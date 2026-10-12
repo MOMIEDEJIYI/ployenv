@@ -40,6 +40,13 @@ func TestVerifyFunctionsParseToolOutput(t *testing.T) {
 			want: "1.27.2",
 		},
 		{
+			// A toolchain built from a branch prints the extra "devel" word first.
+			name: "go (devel)",
+			rel:  filepath.Join("bin", exeName("go")),
+			ver:  "go version devel go1.28-abc1234 windows/amd64\n",
+			want: "1.28-abc1234",
+		},
+		{
 			name: "node",
 			rel:  exeName("node"),
 			ver:  "v22.11.0\n",
@@ -84,15 +91,6 @@ func TestVerifyFunctionsParseToolOutput(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("verify(%s): %v", tc.name, err)
-			}
-			// goVerify parses the first field of `go version` output, which is the
-			// literal word "go", so it always reports an empty version. Pinning
-			// that here would freeze the defect, so the go case only proves the
-			// tool runs and its output is read without error; the parse gap is
-			// reported as a finding (install's real check is HasBinary, so the
-			// cost is a blank line in the verbose log).
-			if strings.HasPrefix(tc.name, "go") {
-				return
 			}
 			if got != tc.want {
 				t.Fatalf("verify(%s) = %q, want %q", tc.name, got, tc.want)

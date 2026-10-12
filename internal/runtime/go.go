@@ -56,9 +56,18 @@ func goVerify(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fields := strings.Fields(strings.TrimSpace(out))
-	if len(fields) >= 1 {
-		return strings.TrimPrefix(fields[0], "go"), nil
+	// `go version` prints "go version go1.27.2 windows/amd64", so the version is
+	// the field that starts with "go" and continues with a digit; the first field
+	// is always the literal word "go" (BUG-023). A devel toolchain prints
+	// "devel go1.28-abc123" first, which the same rule picks up.
+	for _, field := range strings.Fields(out) {
+		if !strings.HasPrefix(field, "go") || len(field) < 3 {
+			continue
+		}
+		if field[2] < '0' || field[2] > '9' {
+			continue
+		}
+		return strings.TrimPrefix(field, "go"), nil
 	}
 	return "", nil
 }
