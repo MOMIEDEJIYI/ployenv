@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-ployenv",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "description": "DSH host plugin that drives the ployenv local runtime version manager from the chat (list/install/use runtimes, ship a ployenv binary, and inject its path list into session shells).",
   "main": "./index.js",
@@ -18,6 +18,12 @@
     "check": "node --check index.js",
     "test": "node stub-smoke.mjs"
   },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "engines": {
     "node": ">=20.18"
   },

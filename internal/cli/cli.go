@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the ployenv release string.
-const Version = "0.3.2"
+const Version = "0.3.3"
 
 // defaultAvailableLimit caps how many versions "available" prints by default,
 // so a runtime with hundreds of releases does not scroll forever.

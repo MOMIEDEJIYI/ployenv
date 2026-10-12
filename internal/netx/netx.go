@@ -86,6 +86,10 @@ func GetJSON(url string, v any) error {
 	return json.Unmarshal(body, v)
 }
 
+// retrySleep is a seam so tests can exercise the retry loop without waiting out
+// the real backoff (2 s + 4 s would otherwise dominate the suite runtime).
+var retrySleep = time.Sleep
+
 // GetJSONRetry retries transient upstream failures (indexes sometimes 5xx).
 func GetJSONRetry(url string, v any) error {
 	var err error
@@ -95,7 +99,7 @@ func GetJSONRetry(url string, v any) error {
 		}
 		logx.Verbosef("request failed (attempt %d): %v", attempt, err)
 		if attempt < 3 {
-			time.Sleep(time.Duration(attempt*2) * time.Second)
+			retrySleep(time.Duration(attempt*2) * time.Second)
 		}
 	}
 	return err
