@@ -70,7 +70,7 @@ func pythonNugetVersions() ([]string, error) {
 	var idx struct {
 		Versions []string `json:"versions"`
 	}
-	if err := netx.GetJSONRetry("https://api.nuget.org/v3-flatcontainer/python/index.json", &idx); err != nil {
+	if err := netx.GetJSONRetry(pythonNugetBase+"/python/index.json", &idx); err != nil {
 		return nil, err
 	}
 	var out []string
@@ -88,7 +88,7 @@ func pythonNugetPlan(ver string) Plan {
 	return Plan{
 		Exact:  ver,
 		File:   archive,
-		Bases:  downloadBases("python", "https://api.nuget.org/v3-flatcontainer", "https://nuget.cdn.azure.cn/v3-flatcontainer"),
+		Bases:  downloadBases("python", pythonNugetBase, "https://nuget.cdn.azure.cn/v3-flatcontainer"),
 		URLFor: func(base string) string { return base + "/python/" + ver + "/" + archive },
 		Layout: LayoutNuGet,
 	}
@@ -104,12 +104,19 @@ type githubRelease struct {
 	} `json:"assets"`
 }
 
-const pythonReleasesURL = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
+// pythonReleasesURL and pythonNugetBase are the two index endpoints that a
+// configured mirror cannot carry (the mirrors only serve archives). They are
+// variables only so tests can point them at a local server; production never
+// reassigns them.
+var (
+	pythonReleasesURL = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
+	pythonNugetBase   = "https://api.nuget.org/v3-flatcontainer"
+)
 
 // pythonOfficial is the upstream source shown by `ployenv config` / `runtimes`.
 func pythonOfficial() string {
 	if platform.IsWindows() {
-		return "https://api.nuget.org/v3-flatcontainer"
+		return pythonNugetBase
 	}
 	return pythonReleasesURL
 }
