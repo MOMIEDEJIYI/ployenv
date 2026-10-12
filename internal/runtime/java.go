@@ -156,7 +156,7 @@ func javaList(filter string) ([]Release, error) {
 	var out []Release
 	for _, r := range rels {
 		ver := r.nameVersion()
-		if ver == "" || !javaMatches(f, ver) {
+		if ver == "" || !javaMatches(javaMatchFilter(f), ver) {
 			continue
 		}
 		out = append(out, Release{Version: ver, Note: r.semver()})
@@ -214,6 +214,14 @@ func javaFeatureFilter(f string) string {
 		}
 	}
 	return first
+}
+
+// javaMatchFilter normalises a request the way javaFeatureFilter reads it, so a
+// prefixed request ("jdk-21") matches the releases of the feature line it
+// resolved to instead of matching nothing (BUG-022).
+func javaMatchFilter(f string) string {
+	f = strings.TrimPrefix(f, "jdk-")
+	return strings.TrimPrefix(f, "v")
 }
 
 // javaMatches is version.Matches extended for the Java 8 "8u<build>-b<build>"
