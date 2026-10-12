@@ -1,0 +1,132 @@
+name: ci
+
+# 门禁 4.x「CI 门禁存在性」的落地实现：
+#   gates         -> gofmt / go vet / go build / go test（windows + ubuntu 双 runner，覆盖平台分层）
+#   coverage      -> 覆盖率产物上传 + 核心包阈值（门禁 3.x「覆盖率口径」）
+#   cross-compile -> linux / macOS 交叉编译（门禁 3.x「跨平台编译校验」）
+#   plugin-smoke  -> DSH 插件语法检查与 stub 冒烟（门禁 4.x「插件冒烟校验」）
+
+on:
+  push:
+    branches: ["develop-v*", main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    name: gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: gofmt must be clean
+        shell: bash
+        run: |
+          fmt=$(gofmt -l ./cmd ./internal)
+          if [ -n "$fmt" ]; then
+            echo "gofmt would change:"
+            echo "$fmt"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test
+        shell: bash
+        run: |
+          # 失败时把失败测试打印成 ::error:: 注解（可从 Actions API 读到，便于定位）
+          set +e
+          go test ./... -count=1 -v > test-output.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            echo "::error::go test failed (exit $code)"
+            grep -E '^(--- FAIL|FAIL|panic:|\s+.*_test\.go:[0-9]+:)' test-output.log | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            echo '----- tail -----'
+            tail -n 40 test-output.log
+          fi
+          exit $code
+
+  coverage:
+    name: coverage (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: unit tests with coverage
+        shell: bash
+        run: go test ./... -count=1 -coverprofile=coverage.out
+      - name: package coverage floors + ratchet
+        shell: bash
+        run: |
+          # 覆盖率在 windows-latest 度量：internal/platform 的测试是 Windows 专属
+          # （link_windows_test.go），在 ubuntu 上该包没有测试文件、覆盖率提取为空。
+          # 提取不到覆盖率的包按“本平台无测试”跳过，不判失败。
+          check_one() {
+            out=$(go test "$1" -count=1 -cover 2>&1 || true)
+            got=$(printf '%s\n' "$out" | sed -n 's/.*coverage: \([0-9.]*\)%.*/\1/p' | head -1)
+            if [ -z "$got" ]; then
+              echo "$1: no coverage on this platform - skipped"
+              return 0
+            fi
+            echo "$1 coverage: $got% (floor $2%)"
+            awk -v c="$got" -v m="$2" 'BEGIN { if (c + 0 < m + 0) exit 1 }' || return 1
+          }
+          ok=0
+          check_one ./internal/jsonx/... 80    || ok=1
+          check_one ./internal/version/... 80  || ok=1
+          check_one ./internal/platform/... 50 || ok=1
+          check_one ./internal/archive/... 40  || ok=1
+
+          go test ./internal/cli/... ./internal/platform/... ./internal/install/... ./internal/jsonx/... ./internal/version/... -count=1 -coverprofile=core.out
+          total=$(go tool cover -func=core.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
+          echo "core combined coverage: $total% (ratchet floor 15%)"
+          awk -v t="$total" 'BEGIN { if (t + 0 < 15) exit 1 }' || ok=1
+
+          [ "$ok" = "0" ] || { echo "coverage gate failed"; exit 1; }
+      - name: upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            core.out
+  cross-compile:
+    name: cross compile (linux / macOS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build all targets
+        run: |
+          GOOS=linux  GOARCH=amd64 go build ./...
+          GOOS=linux  GOARCH=arm64 go build ./...
+          GOOS=darwin GOARCH=amd64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+          GOOS=windows GOARCH=arm64 go build ./...
+
+  plugin-smoke:
+    name: dsh plugin smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: syntax check
+        run: node --check dsh-plugin/index.js
+      - name: stub smoke test
+        run: node dsh-plugin/stub-smoke.mjs

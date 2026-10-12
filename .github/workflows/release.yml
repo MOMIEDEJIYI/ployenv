@@ -1,0 +1,204 @@
+name: release
+
+# Release 流水线
+#   发布的二进制就是仓库里那份 `dsh-plugin/bin/win32-x64/ployenv.exe`，CI **不重建**。
+#   原因：重建会把「运行那一刻的提交」写进二进制的 `vcs.revision`，而内置件里固化的是它
+#   自己那次构建的提交（v0.3.2 的内置件 = `37440d1`，而标签 `v0.3.2` 指向 `9f5c36d`），
+#   字节必然不同 —— 「部署件 = 仓库内置件 = 构建产物」这条字节一致仪式会失效。
+#   本工作流只做三件事：跑门禁 → 用 build.ps1 -Package 摆出资产 → 独立复验后发布。
+#
+# 触发：
+#   push v*           正式发布（推标签，整棵树就是标签树）
+#   workflow_dispatch 补发历史标签；dry_run=true 时只校验、不碰 Release
+#                     补发时"打包脚本取派发分支、二进制取标签本身" —— 历史标签
+#                     （如 v0.3.2）的树里还没有 `build.ps1 -Package`，但发布的资产
+#                     必须是那个标签当时内置的那份二进制
+#
+# 资产（每个 Release 四件，平铺不打包）：
+#   ployenv-v<ver>-windows-amd64.exe   与仓库内置件逐字节相同（身份锚点）
+#   ployenv-windows-amd64.exe          同一份字节的**固定名别名**，供 releases/latest/download 直取
+#                                      （REQ-003 FR-303 的 `setup` 默认源就吃这个 URL）
+#   LICENSE
+#   SHA256SUMS.txt                     消费者用来校验（覆盖上面三件；FR-303 也吃这个格式）
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的注释标签，例如 v0.3.2"
+        required: true
+        type: string
+      dry_run:
+        description: "只校验，不创建/更新 Release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: package and publish
+    runs-on: windows-latest
+    steps:
+      - name: checkout the tree that provides the packaging script
+        uses: actions/checkout@v4
+        with:
+          # push a tag: the tagged tree itself. workflow_dispatch: the dispatched ref, because a
+          # historical tag predates `build.ps1 -Package` (v0.3.2 does) and could not package
+          # itself - the next step then pins the BINARY back to the tag.
+          ref: ${{ github.event_name == 'push' && github.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: resolve the release tag
+        id: rel
+        shell: pwsh
+        run: |
+          $tag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.tag }}' } else { '${{ github.ref_name }}' }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+') { throw "unexpected release tag: '$tag'" }
+          $version = $tag.TrimStart('v')
+          "tag=$tag"         >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "tag=$tag version=$version"
+
+      - name: pin the bundled binary to the release tag (backfill)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: pwsh
+        run: |
+          # Backfilling an existing tag: the packaging script comes from the dispatched ref (an old
+          # tag predates it, v0.3.2 does), but the BINARY has to come from the tag itself - otherwise
+          # the published asset would not be the one that tag shipped.
+          $tag = '${{ steps.rel.outputs.tag }}'
+          & git checkout $tag -- dsh-plugin/bin/win32-x64/ployenv.exe
+          if ($LASTEXITCODE -ne 0) { throw "cannot materialise the bundled binary of $tag" }
+          Write-Host "bundled binary materialised from $tag"
+
+      - name: build gates + lay out the release assets
+        shell: pwsh
+        run: ./build.ps1 -Test -Package -Version '${{ steps.rel.outputs.version }}'
+
+      - name: verify the assets (option B)
+        shell: pwsh
+        run: |
+          # NOTE: this block is deliberately ASCII-only. The runner writes a run block to a
+          # temporary .ps1 file; if that file is read as ANSI (Windows PowerShell 5.1 does when
+          # there is no BOM), a non-ASCII comment can swallow the next line - a trap this project
+          # has already been bitten by. The workspace-level checker (10_release-assets) cannot run
+          # here because it does not live in this repository, so the same checks are inlined; that
+          # checker remains the independent second pair of eyes at handoff time.
+          $version = '${{ steps.rel.outputs.version }}'
+          $dir = 'dist/release'
+          $stem = "ployenv-v$version-windows-amd64"
+          $bundled = 'dsh-plugin/bin/win32-x64/ployenv.exe'
+          $exe = "$dir/$stem.exe"
+
+          # the asset set must be exactly these four: option B allows one binary, period
+          # (`ployenv-windows-amd64.exe` is that same binary under a version-free name, so that
+          # `releases/latest/download/ployenv-windows-amd64.exe` works for FR-303's default source)
+          $expected = @("$stem.exe", 'ployenv-windows-amd64.exe', 'LICENSE', 'SHA256SUMS.txt')
+          $actual = @(Get-ChildItem -LiteralPath $dir -File | Select-Object -ExpandProperty Name)
+          if (Compare-Object $expected $actual) { throw "unexpected asset set: $($actual -join ', ')" }
+
+          # the core assertion of option B: the published .exe IS the bundled binary
+          $hExe = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $hBundled = (Get-FileHash -LiteralPath $bundled -Algorithm SHA256).Hash
+          if ($hExe -ne $hBundled) { throw "published .exe ($hExe) differs from the bundled binary ($hBundled)" }
+          Write-Host "PASS asset-vs-bundled  $hExe"
+          $hAlias = (Get-FileHash -LiteralPath "$dir/ployenv-windows-amd64.exe" -Algorithm SHA256).Hash
+          if ($hAlias -ne $hBundled) { throw "the version-free alias ($hAlias) differs from the bundled binary" }
+          Write-Host "PASS alias-vs-bundled  $hAlias"
+
+          # SHA256SUMS.txt: trust only what the file says, and recompute every line
+          $n = 0
+          foreach ($line in (Get-Content -LiteralPath "$dir/SHA256SUMS.txt")) {
+            if ($line -eq '' -or $line.StartsWith('#')) { continue }
+            if ($line -notmatch '^([0-9A-Fa-f]{64})\s+(.+)$') { throw "malformed line in SHA256SUMS.txt: $line" }
+            $want = $Matches[1]
+            $name = $Matches[2].Trim()
+            $got = (Get-FileHash -LiteralPath (Join-Path $dir $name) -Algorithm SHA256).Hash
+            if ($got -ne $want) { throw "SHA256SUMS.txt mismatch for $name" }
+            Write-Host "PASS sha256  $name"
+            $n++
+          }
+          if ($n -ne 3) { throw "SHA256SUMS.txt covers $n files, expected 3" }
+
+          # tag version = code version (build.ps1 -Version checked it once; this checks the tag)
+          $srcVersion = (Select-String -LiteralPath 'internal/cli/cli.go' -Pattern 'const Version = "([^"]+)"').Matches[0].Groups[1].Value
+          if ($srcVersion -ne $version) { throw "tag says $version but internal/cli/cli.go says $srcVersion" }
+          Write-Host "PASS version  $version"
+
+      - name: create or update the GitHub Release
+        if: ${{ github.event_name == 'push' || inputs.dry_run != true }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ steps.rel.outputs.tag }}'
+          $version = '${{ steps.rel.outputs.version }}'
+          $stem = "ployenv-v$version-windows-amd64"
+          $dir = 'dist/release'
+          $assets = @("$dir/$stem.exe", "$dir/ployenv-windows-amd64.exe", "$dir/LICENSE", "$dir/SHA256SUMS.txt")
+          foreach ($a in $assets) { if (-not (Test-Path -LiteralPath $a)) { throw "missing asset: $a" } }
+
+          # the annotated tag message is the release note
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          (& git tag -l --format='%(contents)' $tag) | Set-Content -LiteralPath $notes -Encoding utf8
+
+          # Assert the note we are about to publish IS the annotated tag message (REQ-004 FR-405 /
+          # I-17). Line endings and trailing whitespace are normalised first - git emits LF while the
+          # file write may use CRLF - but nothing else is allowed to differ. This exists because a
+          # silent mid-line truncation is invisible in the UI and was only caught by an independent
+          # review of the live Release page.
+          $normalise = { param($text) ($text -replace "`r`n", "`n").TrimEnd() }
+          $expectedNotes = (& git tag -l --format='%(contents)' $tag | Out-String)
+          # read with an explicit encoding: Get-Content would use the reader's default and a
+          # BOM-less UTF-8 note file is mojibake under Windows PowerShell 5.1 (which turns this
+          # assertion into a false alarm - or worse, a false pass - depending on the shell).
+          $actualNotes = [IO.File]::ReadAllText($notes, [Text.Encoding]::UTF8)
+          if ((& $normalise $expectedNotes) -ne (& $normalise $actualNotes)) {
+            $exp = (& $normalise $expectedNotes) -split "`n"
+            $act = (& $normalise $actualNotes) -split "`n"
+            $at = 1
+            while ($at -le $exp.Count -and $at -le $act.Count -and $exp[$at - 1] -eq $act[$at - 1]) { $at++ }
+            throw "the release notes differ from the annotated tag message of $tag (first difference at line $at)"
+          }
+          Write-Host "PASS notes-match-tag-message  $($actualNotes.Length) chars"
+
+          & gh release view $tag --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "release $tag already exists -> refreshing assets and notes"
+            & gh release upload $tag @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+            & gh release edit $tag --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed' }
+          } else {
+            & gh release create $tag --title "ployenv $tag" --notes-file $notes @assets
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          }
+
+          & gh release view $tag
+          if ($LASTEXITCODE -ne 0) { throw 'gh release view failed' }
+
+          # leave evidence in the run summary (with the asset hashes), readable without the logs
+          $exe = "$dir/$stem.exe"
+          @(
+            "## release $tag",
+            "",
+            "- binary option: B (the binary committed in this repository; CI never rebuilds it)",
+            "- assets: ``$exe``, ``${dir}/ployenv-windows-amd64.exe`` (version-free alias for `latest/download`), ``${dir}/LICENSE``, ``${dir}/SHA256SUMS.txt``",
+            "- binary SHA-256: ``$((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash)``",
+            "",
+            "### SHA256SUMS.txt",
+            "",
+            '```',
+            (Get-Content -LiteralPath "$dir/SHA256SUMS.txt" -Raw).TrimEnd(),
+            '```'
+          ) >> $env:GITHUB_STEP_SUMMARY

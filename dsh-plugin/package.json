@@ -1,0 +1,63 @@
+{
+  "name": "dsh-plugin-ployenv",
+  "version": "0.3.2",
+  "type": "module",
+  "description": "DSH host plugin that drives the ployenv local runtime version manager from the chat (list/install/use runtimes, ship a ployenv binary, and inject its path list into session shells).",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "stub-smoke.mjs",
+    "bin"
+  ],
+  "scripts": {
+    "check": "node --check index.js",
+    "test": "node stub-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20.18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MOMIEDEJIYI/ployenv.git",
+    "directory": "dsh-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/MOMIEDEJIYI/ployenv/issues"
+  },
+  "homepage": "https://github.com/MOMIEDEJIYI/ployenv/tree/main/dsh-plugin",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "ployenv",
+    "runtime-manager",
+    "version-manager",
+    "node",
+    "go",
+    "python",
+    "java"
+  ],
+  "author": "MOMIEDEJIYI",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": ">=0.1.7-rc.1 <0.2.0 || 0.2.0-rc.2",
+      "node": ">=20.18",
+      "profiles": [
+        "web",
+        "desktop"
+      ]
+    }
+  }
+}

@@ -1,0 +1,40 @@
+# ── Build output ─────────────────────────────────────────────────────────────
+/dist/
+*.exe
+*.test
+*.out
+
+# ── Runtime data (portable mode writes these next to the binary) ─────────────
+/config.json
+/versions/
+/cache/
+/logs/
+/state/
+/ployenv
+/ployenv.exe
+
+# ── Installer payload (generated) ────────────────────────────────────────────
+payload/
+
+# ── Scratch directories ──────────────────────────────────────────────────────
+.tmp*/
+/tmp/
+
+# ── Local Go caches (only present if GOCACHE/GOMODCACHE point here) ──────────
+.gocache/
+.gomodcache/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+
+# REQ-003: the plugin's own ployenv data root lives inside the package and is
+# runtime state, never committed.
+dsh-plugin/data/
+
+# REQ-003: the plugin deliberately ships a ployenv binary for its platform; a
+# clean checkout must stay self-contained, so re-include it after the *.exe rule.
+!dsh-plugin/bin/**/*.exe
