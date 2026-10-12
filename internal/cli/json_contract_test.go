@@ -48,13 +48,12 @@ func runJSON(t *testing.T, args ...string) string {
 // ignored the flag, so the machine-interface contract (FR-18) only held for
 // some commands.
 //
-// Everything lives in one test on purpose: the data root is resolved once per
-// process (config.RootInfo uses sync.Once), so a second t.Setenv would silently
-// keep pointing at the first root. The root deliberately contains non-ASCII
+// The data root is pinned by TestMain (see main_test.go): config resolves it
+// once per process, so a t.Setenv here would be silently ignored as soon as any
+// earlier test had resolved it. The root deliberately contains non-ASCII
 // characters, which the contract says must come back escaped.
 func TestJSONContract(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "中文目录🚀")
-	t.Setenv("PLOYENV_ROOT", root)
+	root := resetSandbox(t)
 
 	for _, v := range []string{"20.0.0", "21.0.0"} {
 		if err := os.MkdirAll(filepath.Join(root, "versions", "node", v), 0o755); err != nil {
