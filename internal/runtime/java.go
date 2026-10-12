@@ -29,8 +29,9 @@ var javaSpec = &Spec{
 
 // adoptiumAPI serves the version index. No public mirror carries this API, so
 // the list always comes from the official endpoint (requirements FR-6: the
-// index and the download source are independent).
-const adoptiumAPI = "https://api.adoptium.net/v3"
+// index and the download source are independent). It is a variable only so
+// tests can point it at a local server; production never reassigns it.
+var adoptiumAPI = "https://api.adoptium.net/v3"
 
 func adoptiumOS() string {
 	switch platform.OS() {
