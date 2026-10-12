@@ -93,13 +93,19 @@ jobs:
           # (floors keep 9.6 and 12.0 points of margin).
           check_one ./internal/runtime/... 85 || ok=1
           check_one ./internal/fsutil/... 75  || ok=1
+          # cli / install went 26.5% -> 92.3% and 28.3% -> 83.1% on 2026-10-12
+          # (floors keep 12.3 and 8.1 points of margin).
+          check_one ./internal/cli/... 80     || ok=1
+          check_one ./internal/install/... 75 || ok=1
 
           go test ./internal/cli/... ./internal/platform/... ./internal/install/... ./internal/jsonx/... ./internal/version/... -count=1 -coverprofile=core.out
           total=$(go tool cover -func=core.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
           # REQ-005: the ratchet only goes up, in steps below the measured value
-          # (33.6% on 2026-10-11) so runner jitter cannot fail the gate; the target is 35%.
-          echo "core combined coverage: $total% (ratchet floor 30%)"
-          awk -v t="$total" 'BEGIN { if (t + 0 < 30) exit 1 }' || ok=1
+          # REQ-005: the ratchet only goes up, in steps below the measured value
+          # (87.4% on 2026-10-12, after cli and install were covered) so runner jitter
+          # cannot fail the gate.
+          echo "core combined coverage: $total% (ratchet floor 75%)"
+          awk -v t="$total" 'BEGIN { if (t + 0 < 75) exit 1 }' || ok=1
 
           [ "$ok" = "0" ] || { echo "coverage gate failed"; exit 1; }
       - name: upload coverage artifacts
