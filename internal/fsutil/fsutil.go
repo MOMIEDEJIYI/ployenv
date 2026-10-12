@@ -1,0 +1,99 @@
+// Package fsutil holds small filesystem and formatting helpers shared across
+// ployenv. It has no ployenv-specific dependencies.
+package fsutil
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+// FileExists reports whether p exists and is a regular file.
+func FileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+// DirExists reports whether p exists and is a directory.
+func DirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// SamePath reports whether two paths refer to the same location, applying the
+// case rules of the host platform: Windows folds case, the Unix-likes do not
+// (BUG-011).
+func SamePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// HumanBytes formats a byte count as "1.5 MB" style text.
+func HumanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// CopyFile copies src to dst, creating parent directories as needed.
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// MoveContentsUp flattens a directory that holds a single sub-directory: the
+// archive layout used by Node, Go and the Python standalone builds. It is a
+// no-op when the directory does not have exactly one child directory.
+func MoveContentsUp(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		return nil
+	}
+	inner := filepath.Join(dir, entries[0].Name())
+	children, err := os.ReadDir(inner)
+	if err != nil {
+		return err
+	}
+	for _, c := range children {
+		from := filepath.Join(inner, c.Name())
+		to := filepath.Join(dir, c.Name())
+		if _, err := os.Stat(to); err == nil {
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(inner)
+}

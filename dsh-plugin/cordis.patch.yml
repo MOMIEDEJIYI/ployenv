@@ -1,0 +1,36 @@
+# Layer contributed by dsh-plugin-ployenv.
+# The profile composes this patch after each earlier bundle layer and before
+# the user's own cordis.patch.yml; patch entries are plain Loader rows.
+- insert:
+    - id: ployenv
+      name: 'dsh-plugin-ployenv'
+      # Row config is passed to apply(ctx, config) unchanged (this plugin
+      # exports no Config schema, so Cordis skips validation and defaulting).
+      # Supported fields, all optional:
+      #   bin              ployenv executable path or PATH name
+      #                    (default: $PLOYENV_BIN, else $PLOYENV_ROOT\ployenv.exe
+      #                    when it exists, else the PATH name "ployenv")
+      #   commandName      slash-command name (default: ployenv)
+      #   toolName         model tool name (default: ployenv)
+      #   root             ployenv data root, passed to the child as
+      #                    PLOYENV_ROOT (default when the bundled binary is used:
+      #                    <package>/data/ployenv; set it to keep data outside
+      #                    the package across plugin updates)
+      #   timeoutMs        per-invocation timeout (default: 120000)
+      #   injectPathAtLoad true prepends the directories reported by
+      #                    "env --shell json" to the harness process PATH as
+      #                    soon as they are known (default: false)
+      #   args             argv template overrides per action. Defaults match
+      #                    the 0.2.0 CLI (internal/cli/cli.go):
+      #                      list:      ["list"]
+      #                      available: ["available", "{runtime}"]
+      #                      install:   ["install", "{runtime}@{version}"]
+      #                      uninstall: ["uninstall", "{runtime}@{version}"]
+      #                      use:       ["use", "{runtime}@{version}"]
+      #                      current:   ["current"]
+      #                      which:     ["which", "{tool}"]
+      #                      env:       ["env", "--shell", "json"]
+      #                      config:    ["config", "--json"]
+      #                      doctor:    ["doctor", "--json"]
+      #                      version:   ["--version"]
+      config: {}
