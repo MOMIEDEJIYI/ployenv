@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 )
 
 // adoptiumSemver is an alias for the anonymous struct the Adoptium response
@@ -321,19 +319,6 @@ func TestJavaFeatureOfMapsEveryNameToItsFeature(t *testing.T) {
 	}
 }
 
-func TestAdoptiumPlatformNames(t *testing.T) {
-	wantOS := map[string]string{"windows": "windows", "darwin": "mac"}[platform.OS()]
-	if wantOS == "" {
-		wantOS = "linux"
-	}
-	if got := adoptiumOS(); got != wantOS {
-		t.Fatalf("adoptiumOS() = %q, want %q", got, wantOS)
-	}
-	wantArch := map[string]string{"amd64": "x64", "arm64": "aarch64"}[platform.Arch()]
-	if wantArch == "" {
-		wantArch = platform.Arch()
-	}
-	if got := adoptiumArch(); got != wantArch {
-		t.Fatalf("adoptiumArch() = %q, want %q", got, wantArch)
-	}
-}
+// The per-platform Adoptium names are asserted in layout_test.go; the two
+// mappings must also agree with the seam for the running host, which that table
+// covers as its host row.

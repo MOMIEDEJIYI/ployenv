@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
 
@@ -53,7 +52,7 @@ func goToolPath(tool, _ string) string {
 }
 
 func goVerify(dir string) (string, error) {
-	out, err := captureOutput(filepath.Join(dir, "bin", exeName("go")), "version")
+	out, err := captureOutput(filepath.Join(dir, goToolPath("go", "")), "version")
 	if err != nil {
 		return "", err
 	}
@@ -112,7 +111,7 @@ func goPlan(ver string) (Plan, error) {
 			continue
 		}
 		for _, f := range r.Files {
-			if f.Kind == "archive" && f.OS == platform.OS() && f.Arch == platform.Arch() {
+			if f.Kind == "archive" && f.OS == hostOS() && f.Arch == hostArch() {
 				name := f.Filename
 				return Plan{
 					Exact:  want,
@@ -125,5 +124,5 @@ func goPlan(ver string) (Plan, error) {
 			}
 		}
 	}
-	return Plan{}, fmt.Errorf("no Go %s archive for this platform (%s/%s)", want, platform.OS(), platform.Arch())
+	return Plan{}, fmt.Errorf("no Go %s archive for this platform (%s/%s)", want, hostOS(), hostArch())
 }

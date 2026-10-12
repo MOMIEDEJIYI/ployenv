@@ -7,7 +7,6 @@ import (
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
 
@@ -34,7 +33,7 @@ var javaSpec = &Spec{
 var adoptiumAPI = "https://api.adoptium.net/v3"
 
 func adoptiumOS() string {
-	switch platform.OS() {
+	switch hostOS() {
 	case "windows":
 		return "windows"
 	case "darwin":
@@ -45,13 +44,13 @@ func adoptiumOS() string {
 }
 
 func adoptiumArch() string {
-	switch platform.Arch() {
+	switch hostArch() {
 	case "amd64":
 		return "x64"
 	case "arm64":
 		return "aarch64"
 	default:
-		return platform.Arch()
+		return hostArch()
 	}
 }
 
@@ -64,7 +63,7 @@ func javaToolPath(tool, _ string) string {
 }
 
 func javaVerify(dir string) (string, error) {
-	out, err := captureOutput(filepath.Join(dir, "bin", exeName("java")), "-version")
+	out, err := captureOutput(filepath.Join(dir, javaToolPath("java", "")), "-version")
 	if err != nil {
 		return "", err
 	}
