@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
 
@@ -21,6 +20,9 @@ var nodeSpec = &Spec{
 	CmdTools: []string{"npm", "npx", "corepack"},
 	Primary:  "node",
 	ToolPath: nodeToolPath,
+	// PathDirs is what a version adds to PATH: the layout differs per platform,
+	// so without this the Unix-likes were handed the version root (BUG-021).
+	PathDirs: nodePathDirs,
 	Verify:   nodeVerify,
 	List:     nodeList,
 	Plan:     nodePlan,
@@ -39,22 +41,36 @@ type nodeIndexEntry struct {
 	LTS     json.RawMessage `json:"lts"`
 }
 
-func nodeToolPath(tool, _ string) string {
+// nodeToolPathFor maps a tool to its path inside a version directory on osName.
+// Node's Windows archive keeps node.exe and the npm/npx shims at the root; the
+// Unix tarballs keep them in bin/.
+func nodeToolPathFor(osName, tool string) string {
+	dir := toolDirFor(osName)
 	switch tool {
 	case "node":
-		return exeName("node")
+		return filepath.Join(dir, exeFor(osName, "node"))
 	case "npm":
-		return "npm" + scriptExt()
+		return filepath.Join(dir, scriptFor(osName, "npm"))
 	case "npx":
-		return "npx" + scriptExt()
+		return filepath.Join(dir, scriptFor(osName, "npx"))
 	case "corepack":
-		return "corepack" + scriptExt()
+		return filepath.Join(dir, scriptFor(osName, "corepack"))
 	}
 	return ""
 }
 
+func nodeToolPath(tool, _ string) string { return nodeToolPathFor(hostOS(), tool) }
+
+// nodePathDirsFor is what gets prepended to PATH for an active version: the
+// version directory on Windows, its bin/ on the Unix-likes.
+func nodePathDirsFor(osName, dir string) []string {
+	return []string{filepath.Join(dir, toolDirFor(osName))}
+}
+
+func nodePathDirs(dir string) []string { return nodePathDirsFor(hostOS(), dir) }
+
 func nodeVerify(dir string) (string, error) {
-	out, err := captureOutput(filepath.Join(dir, exeName("node")), "--version")
+	out, err := captureOutput(filepath.Join(dir, nodeToolPath("node", "")), "--version")
 	if err != nil {
 		return "", err
 	}
@@ -108,14 +124,28 @@ func nodeList(filter string) ([]Release, error) {
 	return out, nil
 }
 
+// nodeArchiveOS, nodeArchiveArch and nodeArchiveExt are the pure forms of the
+// archive naming, so each mapping can be asserted for every platform.
+func nodeArchiveOS(osName string) string {
+	return map[string]string{"windows": "win", "darwin": "darwin", "linux": "linux"}[osName]
+}
+
+func nodeArchiveArch(arch string) string {
+	return map[string]string{"amd64": "x64", "arm64": "arm64", "386": "x86"}[arch]
+}
+
+func nodeArchiveExt(osName string) string {
+	if osName == "windows" {
+		return "zip"
+	}
+	return "tar.gz"
+}
+
 func nodePlan(ver string) (Plan, error) {
 	v := strings.TrimPrefix(ver, "v")
-	osName := map[string]string{"windows": "win", "darwin": "darwin", "linux": "linux"}[platform.OS()]
-	arch := map[string]string{"amd64": "x64", "arm64": "arm64", "386": "x86"}[platform.Arch()]
-	ext := "tar.gz"
-	if platform.IsWindows() {
-		ext = "zip"
-	}
+	osName := nodeArchiveOS(hostOS())
+	arch := nodeArchiveArch(hostArch())
+	ext := nodeArchiveExt(hostOS())
 	// Node archives keep the "v" prefix: node-v20.20.2-win-x64.zip.
 	archive := fmt.Sprintf("node-v%s-%s-%s.%s", v, osName, arch, ext)
 	return Plan{

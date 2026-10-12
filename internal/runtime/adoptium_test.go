@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 )
 
 // adoptiumSemver is an alias for the anonymous struct the Adoptium response
@@ -22,7 +20,8 @@ type adoptiumSemver = struct {
 // carries version, and both must produce the same recorded version.
 const adoptium21JSON = `[
   {"release_name":"jdk-21.0.12.1+1","binaries":[{"package":{"link":"https://example.invalid/jdk21_12.zip","name":"OpenJDK21U-jdk_x64_21.0.12.1_1.zip"}}],"version_data":{"semver":"21.0.12.1+1","major":21}},
-  {"release_name":"jdk-21.0.10+7","binaries":[{"package":{"link":"https://example.invalid/jdk21_10.zip","name":"OpenJDK21U-jdk_x64_21.0.10_7.zip"}}],"version_data":{"semver":"21.0.10+7","major":21}}
+  {"release_name":"jdk-21.0.10+7","binaries":[{"package":{"link":"https://example.invalid/jdk21_10.zip","name":"OpenJDK21U-jdk_x64_21.0.10_7.zip"}}],"version_data":{"semver":"21.0.10+7","major":21}},
+  {"release_name":"jdk-21.0.5","binaries":[{"package":{"link":"https://example.invalid/jdk21_05.zip","name":"OpenJDK21U-jdk_x64_21.0.5_1.zip"}}],"version_data":{"semver":"21.0.5","major":21}}
 ]`
 
 const adoptium8JSON = `[
@@ -95,8 +94,8 @@ func TestJavaListFiltersByFeatureLine(t *testing.T) {
 		if err != nil {
 			t.Fatalf("javaList(%s): %v", filter, err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("javaList(%s) returned %d releases, want both 21.x builds", filter, len(got))
+		if len(got) != 3 {
+			t.Fatalf("javaList(%s) returned %d releases, want all three 21.x builds", filter, len(got))
 		}
 		if got[0].Version != "21.0.12.1+1" || got[0].Note != "21.0.12.1+1" {
 			t.Fatalf("javaList(%s)[0] = %+v", filter, got[0])
@@ -122,20 +121,75 @@ func TestJavaListFiltersByFeatureLine(t *testing.T) {
 	}
 }
 
-// The "jdk-" prefix is stripped when looking up the feature line
-// (javaFeatureFilter accepts it) but not when matching the releases, so a
-// prefixed request finds nothing. This pins the current behavior: if the
-// inconsistency is fixed, this test is the one to update.
-func TestJavaListJdkPrefixedRequestFindsNothing(t *testing.T) {
+// BUG-022: the feature lookup strips the jdk-/v prefix, but the match used the raw
+// request, so `available java jdk-21` listed nothing while `available java 21`
+// listed every 21.x build. The prefixed form must narrow the same way.
+func TestJavaListPrefixedRequestsMatchTheFeatureLine(t *testing.T) {
 	adoptiumServer(t)
 
-	for _, filter := range []string{"jdk-21", "jdk8"} {
-		got, err := javaList(filter)
+	for _, tc := range []struct {
+		request string
+		want    []string
+	}{
+		{"21", []string{"21.0.12.1+1", "21.0.10+7", "21.0.5"}},
+		{"v21", []string{"21.0.12.1+1", "21.0.10+7", "21.0.5"}},
+		{"jdk-21", []string{"21.0.12.1+1", "21.0.10+7", "21.0.5"}},
+		{"jdk-21.0.5", []string{"21.0.5"}},
+		{"jdk-8", []string{"8u462-b08"}},
+	} {
+		got, err := javaList(tc.request)
 		if err != nil {
-			t.Fatalf("javaList(%s): %v", filter, err)
+			t.Fatalf("javaList(%s): %v", tc.request, err)
+		}
+		versions := make([]string, 0, len(got))
+		for _, r := range got {
+			versions = append(versions, r.Version)
+		}
+		if !equalStrings(versions, tc.want) {
+			t.Errorf("javaList(%s) = %v, want %v", tc.request, versions, tc.want)
+		}
+	}
+
+	// The channel keywords keep their meaning: they list the newest releases
+	// rather than being read as a version request.
+	for _, channel := range []string{"latest", "lts", "stable"} {
+		got, err := javaList(channel)
+		if err != nil {
+			t.Fatalf("javaList(%s): %v", channel, err)
+		}
+		if len(got) == 0 {
+			t.Errorf("javaList(%s) returned nothing; a channel must list releases", channel)
+		}
+	}
+
+	// And a request that cannot name a feature line still matches nothing: the
+	// BUG-003 guard must survive the normalisation.
+	for _, unknown := range []string{"foo", "jdk8", "abc21", "jdk-foo"} {
+		got, err := javaList(unknown)
+		if err != nil {
+			t.Fatalf("javaList(%s): %v", unknown, err)
 		}
 		if len(got) != 0 {
-			t.Fatalf("javaList(%s) = %+v, want no matches from a prefixed request", filter, got)
+			t.Errorf("javaList(%s) = %+v, want nothing", unknown, got)
+		}
+	}
+}
+
+func TestJavaMatchFilter(t *testing.T) {
+	cases := map[string]string{
+		"jdk-21":     "21",
+		"jdk-21.0.5": "21.0.5",
+		"jdk-8":      "8",
+		"v21":        "21",
+		"21":         "21",
+		// The bare "jdk8" form is not a feature request at all, so the filter
+		// leaves it alone and the (empty) feature lookup rejects it first.
+		"jdk8": "jdk8",
+		"":     "",
+	}
+	for in, want := range cases {
+		if got := javaMatchFilter(in); got != want {
+			t.Errorf("javaMatchFilter(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -321,19 +375,6 @@ func TestJavaFeatureOfMapsEveryNameToItsFeature(t *testing.T) {
 	}
 }
 
-func TestAdoptiumPlatformNames(t *testing.T) {
-	wantOS := map[string]string{"windows": "windows", "darwin": "mac"}[platform.OS()]
-	if wantOS == "" {
-		wantOS = "linux"
-	}
-	if got := adoptiumOS(); got != wantOS {
-		t.Fatalf("adoptiumOS() = %q, want %q", got, wantOS)
-	}
-	wantArch := map[string]string{"amd64": "x64", "arm64": "aarch64"}[platform.Arch()]
-	if wantArch == "" {
-		wantArch = platform.Arch()
-	}
-	if got := adoptiumArch(); got != wantArch {
-		t.Fatalf("adoptiumArch() = %q, want %q", got, wantArch)
-	}
-}
+// The per-platform Adoptium names are asserted in layout_test.go; the two
+// mappings must also agree with the seam for the running host, which that table
+// covers as its host row.

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -123,22 +124,6 @@ func TestPythonAssetListKeepsOneAssetPerVersion(t *testing.T) {
 	}
 }
 
-func TestPythonOfficialSourceDependsOnThePlatform(t *testing.T) {
-	nuget := staticServer(t, map[string]string{})
-	standalone := staticServer(t, map[string]string{})
-	override(t, &pythonNugetBase, nuget.URL)
-	override(t, &pythonReleasesURL, standalone.URL)
-
-	want := standalone.URL
-	if platform.IsWindows() {
-		// Windows has no standalone build; python comes from NuGet there.
-		want = nuget.URL
-	}
-	if got := pythonOfficial(); got != want {
-		t.Fatalf("pythonOfficial() = %q, want %q", got, want)
-	}
-}
-
 func TestPythonEndpointsDefaultToTheDocumentedSources(t *testing.T) {
 	if pythonNugetBase != "https://api.nuget.org/v3-flatcontainer" {
 		t.Errorf("pythonNugetBase = %q", pythonNugetBase)
@@ -151,76 +136,100 @@ func TestPythonEndpointsDefaultToTheDocumentedSources(t *testing.T) {
 	}
 }
 
+// Both platform flows are asserted from any host: the seam decides which index is
+// the version list, so Windows (NuGet packages) and the Unix-likes (standalone
+// tarballs) are covered on every runner.
 func TestPythonListAndPlanPerPlatform(t *testing.T) {
-	nuget := staticServer(t, map[string]string{"/python/index.json": `{"versions":["3.12.10","3.11.9"]}`})
+	nuget := staticServer(t, map[string]string{"/python/index.json": pythonNugetIndexJSON})
 	override(t, &pythonNugetBase, nuget.URL)
 
-	suffix := pythonAssetSuffix()
-	assets := staticServer(t, map[string]string{"/": fmt.Sprintf(
-		`[{"tag_name":"20241016","assets":[
-		   {"name":"cpython-3.12.7+20241016-%[1]s","browser_download_url":"https://github.invalid/python-3.12.7.tar.gz"},
-		   {"name":"cpython-3.11.9+20241016-%[1]s","browser_download_url":"https://github.invalid/python-3.11.9.tar.gz"}
-		 ]}]`, suffix)})
+	const standaloneVersion = "3.12.7"
+	assets := server(t, func(w http.ResponseWriter, r *http.Request) {
+		// The asset suffix follows the platform the seam reports, so it is built
+		// per case instead of once.
+		suffix := pythonAssetSuffix()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `[{"tag_name":"20241016","assets":[
+		   {"name":"cpython-%[1]s+20241016-%[2]s","browser_download_url":"https://github.invalid/python-%[1]s.tar.gz"},
+		   {"name":"cpython-3.11.9+20241016-%[2]s","browser_download_url":"https://github.invalid/python-3.11.9.tar.gz"}
+		 ]}]`, standaloneVersion, suffix)
+	})
 	override(t, &pythonReleasesURL, assets.URL)
-
 	// The archive mirror is what a user configures; it only ever carries the
-	// standalone layout, so it is the download base, not the index.
+	// standalone layout, so it is a download base, not an index.
 	writeConfig(t, map[string]string{"python": "https://mirror.invalid/python-build-standalone"})
 
-	list, err := pythonList("3.12")
-	if err != nil {
-		t.Fatalf("pythonList(3.12): %v", err)
-	}
-	if len(list) != 1 {
-		t.Fatalf("pythonList(3.12) returned %d releases, want 1: %+v", len(list), list)
-	}
-
-	if platform.IsWindows() {
-		if list[0].Version != "3.12.10" || list[0].Note != "nuget python (includes pip)" {
-			t.Fatalf("on Windows python comes from nuget, got %+v", list[0])
+	t.Run("windows", func(t *testing.T) {
+		withOS(t, "windows")
+		list, err := pythonList("3.12")
+		if err != nil {
+			t.Fatalf("pythonList(3.12): %v", err)
+		}
+		// The NuGet index lists 3.12.10 and 3.11.9 (with a prerelease stripped).
+		if len(list) != 1 || list[0].Version != "3.12.10" || list[0].Note != "nuget python (includes pip)" {
+			t.Fatalf("pythonList(3.12) = %+v, want the NuGet 3.12.10", list)
 		}
 		plan, err := pythonPlan(list[0].Version)
 		if err != nil {
 			t.Fatalf("pythonPlan: %v", err)
 		}
 		if plan.Layout != LayoutNuGet || plan.File != "python.3.12.10.nupkg" {
-			t.Fatalf("plan = %+v, want the nuget package", plan)
+			t.Fatalf("plan = %+v, want the NuGet package", plan)
 		}
-		return
-	}
+		if want := nuget.URL + "/python/3.12.10/python.3.12.10.nupkg"; plan.URLFor(nuget.URL) != want {
+			t.Fatalf("URLFor = %q, want %q", plan.URLFor(nuget.URL), want)
+		}
+		// The channel keywords are not version filters: the fixture publishes
+		// 3.11.9, 3.12.10, 3.13.0 and the legacy 3.5.2.1 (its two prereleases are
+		// stripped before the filter runs).
+		all, err := pythonList("latest")
+		if err != nil {
+			t.Fatalf("pythonList(latest): %v", err)
+		}
+		if len(all) != 4 {
+			t.Fatalf("pythonList(latest) returned %d releases, want all 4 published ones: %+v", len(all), all)
+		}
+	})
 
-	if list[0].Version != "3.12.7" || list[0].Note != "cpython-3.12.7+20241016-"+suffix {
-		t.Fatalf("on the Unix-likes python comes from the standalone builds, got %+v", list[0])
-	}
-	plan, err := pythonPlan(list[0].Version)
-	if err != nil {
-		t.Fatalf("pythonPlan: %v", err)
-	}
-	if plan.Layout != LayoutFlatten {
-		t.Fatalf("Layout = %v, want LayoutFlatten", plan.Layout)
-	}
-	wantMirror := "https://mirror.invalid/python-build-standalone/20241016/" + plan.File
-	if len(plan.Bases) != 2 || plan.Bases[0] != wantMirror {
-		t.Fatalf("Bases = %v, want the configured mirror first (%q)", plan.Bases, wantMirror)
-	}
-	if plan.Bases[1] != "https://github.invalid/python-3.12.7.tar.gz" {
-		t.Fatalf("Bases = %v, want the GitHub asset as the fallback", plan.Bases)
-	}
-	if got := plan.URLFor(plan.Bases[1]); got != plan.Bases[1] {
-		t.Fatalf("URLFor = %q, want the base itself for the GitHub release", got)
-	}
+	t.Run("linux", func(t *testing.T) {
+		withOS(t, "linux")
+		suffix := pythonAssetSuffix()
+		list, err := pythonList("3.12")
+		if err != nil {
+			t.Fatalf("pythonList(3.12): %v", err)
+		}
+		if len(list) != 1 || list[0].Version != standaloneVersion || list[0].Note != "cpython-"+standaloneVersion+"+20241016-"+suffix {
+			t.Fatalf("pythonList(3.12) = %+v, want the standalone %s", list, standaloneVersion)
+		}
+		plan, err := pythonPlan(list[0].Version)
+		if err != nil {
+			t.Fatalf("pythonPlan: %v", err)
+		}
+		if plan.Layout != LayoutFlatten {
+			t.Fatalf("Layout = %v, want LayoutFlatten", plan.Layout)
+		}
+		wantMirror := "https://mirror.invalid/python-build-standalone/20241016/" + plan.File
+		if len(plan.Bases) != 2 || plan.Bases[0] != wantMirror {
+			t.Fatalf("Bases = %v, want the configured mirror first (%q)", plan.Bases, wantMirror)
+		}
+		if plan.Bases[1] != "https://github.invalid/python-"+standaloneVersion+".tar.gz" {
+			t.Fatalf("Bases = %v, want the GitHub asset as the fallback", plan.Bases)
+		}
+		if got := plan.URLFor(plan.Bases[1]); got != plan.Bases[1] {
+			t.Fatalf("URLFor = %q, want the base itself for the GitHub release", got)
+		}
 
-	// A version that no asset matches is an error, not an empty plan.
-	if _, err := pythonPlan("9.9.9"); err == nil {
-		t.Fatal("pythonPlan must fail for a version that does not exist")
-	}
-
-	// The channel keywords must not be treated as a version filter.
-	all, err := pythonList("latest")
-	if err != nil {
-		t.Fatalf("pythonList(latest): %v", err)
-	}
-	if len(all) != 2 {
-		t.Fatalf("pythonList(latest) returned %d releases, want both assets", len(all))
-	}
+		// A version that no asset matches is an error, not an empty plan.
+		if _, err := pythonPlan("9.9.9"); err == nil {
+			t.Fatal("pythonPlan must fail for a version that does not exist")
+		}
+		// The channel keywords must not be treated as a version filter.
+		all, err := pythonList("latest")
+		if err != nil {
+			t.Fatalf("pythonList(latest): %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("pythonList(latest) returned %d releases, want both assets", len(all))
+		}
+	})
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
 	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
 
@@ -28,8 +27,27 @@ var pythonSpec = &Spec{
 	Plan:     pythonPlan,
 }
 
-func pythonPathDirs(dir string) []string {
-	if platform.IsWindows() {
+// pythonToolPathFor maps a tool to its path inside a version directory on
+// osName. Windows installs come from NuGet, which keeps python.exe at the root
+// and the pip shims in Scripts/; the standalone builds used elsewhere keep both
+// in bin/.
+func pythonToolPathFor(osName, tool string) string {
+	switch tool {
+	case "python", "python3":
+		return filepath.Join(toolDirFor(osName), exeFor(osName, "python"))
+	case "pip", "pip3":
+		if osName == "windows" {
+			return filepath.Join("Scripts", exeFor(osName, "pip"))
+		}
+		return filepath.Join(toolDirFor(osName), exeFor(osName, "pip"))
+	}
+	return ""
+}
+
+func pythonToolPath(tool, _ string) string { return pythonToolPathFor(hostOS(), tool) }
+
+func pythonPathDirsFor(osName, dir string) []string {
+	if osName == "windows" {
 		// A Windows install keeps python.exe in dir and only sometimes has a
 		// Scripts subdirectory; a directory that does not exist must not be put
 		// on PATH (I-09).
@@ -42,21 +60,10 @@ func pythonPathDirs(dir string) []string {
 	return []string{filepath.Join(dir, "bin")}
 }
 
-func pythonToolPath(tool, _ string) string {
-	switch tool {
-	case "python", "python3":
-		return exeName("python")
-	case "pip", "pip3":
-		if platform.IsWindows() {
-			return filepath.Join("Scripts", exeName("pip"))
-		}
-		return filepath.Join("bin", "pip")
-	}
-	return ""
-}
+func pythonPathDirs(dir string) []string { return pythonPathDirsFor(hostOS(), dir) }
 
 func pythonVerify(dir string) (string, error) {
-	out, err := captureOutput(filepath.Join(dir, exeName("python")),
+	out, err := captureOutput(filepath.Join(dir, pythonToolPath("python", "")),
 		"-c", "import sys;print('.'.join(map(str,sys.version_info[:3])))")
 	if err != nil {
 		return "", err
@@ -115,14 +122,14 @@ var (
 
 // pythonOfficial is the upstream source shown by `ployenv config` / `runtimes`.
 func pythonOfficial() string {
-	if platform.IsWindows() {
+	if hostOS() == "windows" {
 		return pythonNugetBase
 	}
 	return pythonReleasesURL
 }
 
 func pythonAssetSuffix() string {
-	switch platform.OS() + "/" + platform.Arch() {
+	switch hostOS() + "/" + hostArch() {
 	case "windows/amd64":
 		return "x86_64-pc-windows-msvc-install_only.tar.gz"
 	case "windows/arm64":
@@ -188,7 +195,7 @@ func pythonList(filter string) ([]Release, error) {
 	keep := func(v string) bool {
 		return f == "" || f == "all" || f == "latest" || version.Matches(f, v)
 	}
-	if platform.IsWindows() {
+	if hostOS() == "windows" {
 		versions, err := pythonNugetVersions()
 		if err != nil {
 			return nil, err
@@ -213,7 +220,7 @@ func pythonList(filter string) ([]Release, error) {
 }
 
 func pythonPlan(ver string) (Plan, error) {
-	if platform.IsWindows() {
+	if hostOS() == "windows" {
 		return pythonNugetPlan(ver), nil
 	}
 	assets, err := pythonAssetList()

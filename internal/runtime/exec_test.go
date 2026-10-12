@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 )
 
 // captureOutput is the only way a provider learns a tool's version, so both the
@@ -37,31 +35,40 @@ func TestVerifyFunctionsParseToolOutput(t *testing.T) {
 	}{
 		{
 			name: "go",
-			rel:  filepath.Join("bin", exeName("go")),
+			rel:  goToolPath("go", ""),
 			ver:  "go version go1.27.2 windows/amd64\n",
 			want: "1.27.2",
 		},
 		{
+			// A toolchain built from a branch prints the extra "devel" word first.
+			name: "go (devel)",
+			rel:  goToolPath("go", ""),
+			ver:  "go version devel go1.28-abc1234 windows/amd64\n",
+			want: "1.28-abc1234",
+		},
+		{
+			// The fake tool goes wherever the platform layout puts the real one;
+			// that mapping is asserted on its own in layout_test.go.
 			name: "node",
-			rel:  exeName("node"),
+			rel:  nodeToolPathFor(hostOS(), "node"),
 			ver:  "v22.11.0\n",
 			want: "22.11.0",
 		},
 		{
 			name: "python",
-			rel:  exeName("python"),
+			rel:  pythonToolPathFor(hostOS(), "python"),
 			ver:  "3.12.10\n",
 			want: "3.12.10",
 		},
 		{
 			name: "java (openjdk line)",
-			rel:  filepath.Join("bin", exeName("java")),
+			rel:  javaToolPath("java", ""),
 			ver:  "openjdk version \"21.0.12.1\" 2026-01-01\nOpenJDK Runtime Environment (build 21.0.12.1+1)\n",
 			want: "21.0.12.1",
 		},
 		{
 			name: "java (java version line)",
-			rel:  filepath.Join("bin", exeName("java")),
+			rel:  javaToolPath("java", ""),
 			ver:  "java version \"1.8.0_462\"\n",
 			want: "1.8.0_462",
 		},
@@ -86,15 +93,6 @@ func TestVerifyFunctionsParseToolOutput(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("verify(%s): %v", tc.name, err)
-			}
-			// goVerify parses the first field of `go version` output, which is the
-			// literal word "go", so it always reports an empty version. Pinning
-			// that here would freeze the defect, so the go case only proves the
-			// tool runs and its output is read without error; the parse gap is
-			// reported as a finding (install's real check is HasBinary, so the
-			// cost is a blank line in the verbose log).
-			if strings.HasPrefix(tc.name, "go") {
-				return
 			}
 			if got != tc.want {
 				t.Fatalf("verify(%s) = %q, want %q", tc.name, got, tc.want)
@@ -149,30 +147,18 @@ func TestVerifyFunctionsTolerateOutputWithoutAVersion(t *testing.T) {
 	}
 }
 
-func TestToolPathsFollowTheLayoutOfEachRuntime(t *testing.T) {
-	goPath := goToolPath("go", "1.27.2")
-	if goPath != filepath.Join("bin", exeName("go")) {
-		t.Fatalf("goToolPath = %q", goPath)
+// The per-platform tool paths are asserted in layout_test.go; what matters here
+// is that the accessors the specs use follow the platform. Go and Java are the
+// two runtimes whose tool names the OS does not move.
+func TestGoAndJavaToolPaths(t *testing.T) {
+	if got := goToolPath("go", "1.27.2"); got != filepath.Join("bin", exeName("go")) {
+		t.Fatalf("goToolPath = %q", got)
 	}
 	if got := goToolPath("gofmt", "1.27.2"); got != filepath.Join("bin", exeName("gofmt")) {
 		t.Fatalf("goToolPath(gofmt) = %q", got)
 	}
 	if got := goToolPath("java", "1.0"); got != "" {
 		t.Fatalf("goToolPath(java) = %q, want empty", got)
-	}
-
-	for tool, rel := range map[string]string{
-		"node":     exeName("node"),
-		"npm":      "npm" + scriptExt(),
-		"npx":      "npx" + scriptExt(),
-		"corepack": "corepack" + scriptExt(),
-	} {
-		if got := nodeToolPath(tool, "22.11.0"); got != rel {
-			t.Fatalf("nodeToolPath(%s) = %q, want %q", tool, got, rel)
-		}
-	}
-	if got := nodeToolPath("yarn", "22.11.0"); got != "" {
-		t.Fatalf("nodeToolPath(yarn) = %q, want empty", got)
 	}
 
 	for _, tool := range []string{"java", "javac", "jar", "jshell", "keytool"} {
@@ -183,34 +169,5 @@ func TestToolPathsFollowTheLayoutOfEachRuntime(t *testing.T) {
 	}
 	if got := javaToolPath("node", "21"); got != "" {
 		t.Fatalf("javaToolPath(node) = %q, want empty", got)
-	}
-
-	// pythonToolPath returns a bare tool name for python/python3, which matches
-	// the NuGet layout Windows installs (python.exe sits at the version root).
-	// The Unix-likes use the standalone layout, where pythonPathDirs keeps the
-	// interpreter in bin/ - so the bare name cannot resolve there. That
-	// inconsistency is reported as a finding, so it is not pinned here.
-	if platform.IsWindows() {
-		for _, tool := range []string{"python", "python3"} {
-			if got := pythonToolPath(tool, "3.12"); got != exeName("python") {
-				t.Fatalf("pythonToolPath(%s) = %q, want %q", tool, got, exeName("python"))
-			}
-		}
-	} else {
-		t.Logf("pythonToolPath(python) = %q while the version directory keeps it in bin/ (reported finding)",
-			pythonToolPath("python", "3.12"))
-	}
-	wantPip := filepath.Join("bin", "pip")
-	if platform.IsWindows() {
-		wantPip = filepath.Join("Scripts", exeName("pip"))
-	}
-	if got := pythonToolPath("pip", "3.12"); got != wantPip {
-		t.Fatalf("pythonToolPath(pip) = %q, want %q", got, wantPip)
-	}
-	if got := pythonToolPath("pip3", "3.12"); got != wantPip {
-		t.Fatalf("pythonToolPath(pip3) = %q, want %q", got, wantPip)
-	}
-	if got := pythonToolPath("node", "3.12"); got != "" {
-		t.Fatalf("pythonToolPath(node) = %q, want empty", got)
 	}
 }

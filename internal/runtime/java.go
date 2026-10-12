@@ -7,7 +7,6 @@ import (
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
 
@@ -34,7 +33,7 @@ var javaSpec = &Spec{
 var adoptiumAPI = "https://api.adoptium.net/v3"
 
 func adoptiumOS() string {
-	switch platform.OS() {
+	switch hostOS() {
 	case "windows":
 		return "windows"
 	case "darwin":
@@ -45,13 +44,13 @@ func adoptiumOS() string {
 }
 
 func adoptiumArch() string {
-	switch platform.Arch() {
+	switch hostArch() {
 	case "amd64":
 		return "x64"
 	case "arm64":
 		return "aarch64"
 	default:
-		return platform.Arch()
+		return hostArch()
 	}
 }
 
@@ -64,7 +63,7 @@ func javaToolPath(tool, _ string) string {
 }
 
 func javaVerify(dir string) (string, error) {
-	out, err := captureOutput(filepath.Join(dir, "bin", exeName("java")), "-version")
+	out, err := captureOutput(filepath.Join(dir, javaToolPath("java", "")), "-version")
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +156,7 @@ func javaList(filter string) ([]Release, error) {
 	var out []Release
 	for _, r := range rels {
 		ver := r.nameVersion()
-		if ver == "" || !javaMatches(f, ver) {
+		if ver == "" || !javaMatches(javaMatchFilter(f), ver) {
 			continue
 		}
 		out = append(out, Release{Version: ver, Note: r.semver()})
@@ -215,6 +214,14 @@ func javaFeatureFilter(f string) string {
 		}
 	}
 	return first
+}
+
+// javaMatchFilter normalises a request the way javaFeatureFilter reads it, so a
+// prefixed request ("jdk-21") matches the releases of the feature line it
+// resolved to instead of matching nothing (BUG-022).
+func javaMatchFilter(f string) string {
+	f = strings.TrimPrefix(f, "jdk-")
+	return strings.TrimPrefix(f, "v")
 }
 
 // javaMatches is version.Matches extended for the Java 8 "8u<build>-b<build>"

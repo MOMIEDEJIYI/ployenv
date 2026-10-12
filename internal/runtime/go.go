@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
-	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
 
@@ -53,13 +52,22 @@ func goToolPath(tool, _ string) string {
 }
 
 func goVerify(dir string) (string, error) {
-	out, err := captureOutput(filepath.Join(dir, "bin", exeName("go")), "version")
+	out, err := captureOutput(filepath.Join(dir, goToolPath("go", "")), "version")
 	if err != nil {
 		return "", err
 	}
-	fields := strings.Fields(strings.TrimSpace(out))
-	if len(fields) >= 1 {
-		return strings.TrimPrefix(fields[0], "go"), nil
+	// `go version` prints "go version go1.27.2 windows/amd64", so the version is
+	// the field that starts with "go" and continues with a digit; the first field
+	// is always the literal word "go" (BUG-023). A devel toolchain prints
+	// "devel go1.28-abc123" first, which the same rule picks up.
+	for _, field := range strings.Fields(out) {
+		if !strings.HasPrefix(field, "go") || len(field) < 3 {
+			continue
+		}
+		if field[2] < '0' || field[2] > '9' {
+			continue
+		}
+		return strings.TrimPrefix(field, "go"), nil
 	}
 	return "", nil
 }
@@ -112,7 +120,7 @@ func goPlan(ver string) (Plan, error) {
 			continue
 		}
 		for _, f := range r.Files {
-			if f.Kind == "archive" && f.OS == platform.OS() && f.Arch == platform.Arch() {
+			if f.Kind == "archive" && f.OS == hostOS() && f.Arch == hostArch() {
 				name := f.Filename
 				return Plan{
 					Exact:  want,
@@ -125,5 +133,5 @@ func goPlan(ver string) (Plan, error) {
 			}
 		}
 	}
-	return Plan{}, fmt.Errorf("no Go %s archive for this platform (%s/%s)", want, platform.OS(), platform.Arch())
+	return Plan{}, fmt.Errorf("no Go %s archive for this platform (%s/%s)", want, hostOS(), hostArch())
 }

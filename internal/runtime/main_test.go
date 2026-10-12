@@ -130,6 +130,25 @@ func override(t *testing.T, target *string, url string) {
 	t.Cleanup(func() { *target = old })
 }
 
+// withOS fakes the platform for the duration of a test, so every mapping that
+// differs per OS can be asserted for all of them from a single host. A runner
+// can only ever execute one platform's code path, which is exactly how a layout
+// that is wrong on the other one used to slip through (BUG-021).
+func withOS(t *testing.T, osName string) {
+	t.Helper()
+	old := hostOS
+	hostOS = func() string { return osName }
+	t.Cleanup(func() { hostOS = old })
+}
+
+// withArch is the architecture counterpart of withOS.
+func withArch(t *testing.T, arch string) {
+	t.Helper()
+	old := hostArch
+	hostArch = func() string { return arch }
+	t.Cleanup(func() { hostArch = old })
+}
+
 func equalStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
