@@ -35,38 +35,40 @@ func TestVerifyFunctionsParseToolOutput(t *testing.T) {
 	}{
 		{
 			name: "go",
-			rel:  filepath.Join("bin", exeName("go")),
+			rel:  goToolPath("go", ""),
 			ver:  "go version go1.27.2 windows/amd64\n",
 			want: "1.27.2",
 		},
 		{
 			// A toolchain built from a branch prints the extra "devel" word first.
 			name: "go (devel)",
-			rel:  filepath.Join("bin", exeName("go")),
+			rel:  goToolPath("go", ""),
 			ver:  "go version devel go1.28-abc1234 windows/amd64\n",
 			want: "1.28-abc1234",
 		},
 		{
+			// The fake tool goes wherever the platform layout puts the real one;
+			// that mapping is asserted on its own in layout_test.go.
 			name: "node",
-			rel:  exeName("node"),
+			rel:  nodeToolPathFor(hostOS(), "node"),
 			ver:  "v22.11.0\n",
 			want: "22.11.0",
 		},
 		{
 			name: "python",
-			rel:  exeName("python"),
+			rel:  pythonToolPathFor(hostOS(), "python"),
 			ver:  "3.12.10\n",
 			want: "3.12.10",
 		},
 		{
 			name: "java (openjdk line)",
-			rel:  filepath.Join("bin", exeName("java")),
+			rel:  javaToolPath("java", ""),
 			ver:  "openjdk version \"21.0.12.1\" 2026-01-01\nOpenJDK Runtime Environment (build 21.0.12.1+1)\n",
 			want: "21.0.12.1",
 		},
 		{
 			name: "java (java version line)",
-			rel:  filepath.Join("bin", exeName("java")),
+			rel:  javaToolPath("java", ""),
 			ver:  "java version \"1.8.0_462\"\n",
 			want: "1.8.0_462",
 		},
