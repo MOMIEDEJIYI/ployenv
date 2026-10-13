@@ -229,8 +229,8 @@ func TestJavaPlanBuildsMirrorAndOfficialBases(t *testing.T) {
 	if plan.File != "OpenJDK21U-jdk_x64_21.0.12.1_1.zip" {
 		t.Fatalf("File = %q", plan.File)
 	}
-	if plan.Layout != LayoutFlatten {
-		t.Fatalf("Layout = %v, want LayoutFlatten", plan.Layout)
+	if got, want := plan.Layout, javaLayout(); got != want {
+		t.Fatalf("Layout = %v, want %v", got, want)
 	}
 	wantRel := fmt.Sprintf("21/jdk/%s/%s/%s", adoptiumArch(), adoptiumOS(), plan.File)
 	if len(plan.Bases) != 2 || plan.Bases[0] != "https://example.invalid/jdk21_12.zip" {

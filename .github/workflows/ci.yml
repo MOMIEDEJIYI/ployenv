@@ -5,6 +5,14 @@ name: ci
 #   coverage      -> 覆盖率产物上传 + 核心包阈值（门禁 3.x「覆盖率口径」）
 #   cross-compile -> linux / macOS 交叉编译（门禁 3.x「跨平台编译校验」）
 #   plugin-smoke  -> DSH 插件语法检查与 stub 冒烟（门禁 4.x「插件冒烟校验」）
+#
+# macOS additions (REQ-008): cross-compiling darwin only type-checks the code, it
+# never executes the non-Windows branches. These jobs run on real darwin machines.
+#   gates-macos       -> darwin/arm64: gofmt / vet / build / tests, on every push
+#   gates-macos-intel -> darwin/amd64: the same, at release points and on batch branches
+#   e2e-macos         -> darwin end-to-end install / activate / inspect / uninstall,
+#                        at release points, on manual dispatch, or on a batch
+#                        branch (it downloads a runtime)
 
 on:
   push:
@@ -43,12 +51,147 @@ jobs:
         shell: bash
         run: |
           # 失败时把失败测试打印成 ::error:: 注解（可从 Actions API 读到，便于定位）
+          # A skipped test logs its reason in the same shape as a failed
+          # assertion, so annotations come from the --- FAIL blocks (and from
+          # panics) rather than from every "file.go:12:" line.
           set +e
           go test ./... -count=1 -v > test-output.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
             echo "::error::go test failed (exit $code)"
-            grep -E '^(--- FAIL|FAIL|panic:|\s+.*_test\.go:[0-9]+:)' test-output.log | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            {
+              awk '/^=== RUN   /{buf="";inbuf=1} inbuf{buf=buf $0 "\n"} /^--- FAIL: /{printf "%s",buf;inbuf=0;buf=""}' test-output.log
+              grep -E '^panic:' test-output.log
+            } | head -n 40 | while IFS= read -r line; do echo "::error::$line"; done
+            echo '----- tail -----'
+            tail -n 40 test-output.log
+          fi
+          exit $code
+
+  gates-macos:
+    name: gates (macos-15, darwin/arm64)
+    # Real-machine darwin/arm64 evidence. The ubuntu legs already run the
+    # non-Windows code, but only here does it execute on the platform the code
+    # claims to support, with the macOS toolchain and filesystem semantics.
+    # Public repositories do not pay for macOS runner minutes, so this is part
+    # of the everyday gate.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: gofmt must be clean
+        run: |
+          fmt=$(gofmt -l ./cmd ./internal)
+          if [ -n "$fmt" ]; then
+            echo "gofmt would change:"
+            echo "$fmt"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: the darwin/arm64 binary is static and actually runs
+        run: |
+          # Building proves nothing about the result, so one binary is built,
+          # run, and checked for a C library dependency (FR-801).
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/ployenv" ./cmd/ployenv
+          "$RUNNER_TEMP/ployenv" --version
+          if go version -m "$RUNNER_TEMP/ployenv" | grep -q 'cgo'; then
+            echo "::error::the darwin/arm64 binary is not static (cgo is linked in)"
+            exit 1
+          fi
+          # A Mach-O executable always carries dyld, so what is asserted here is
+          # that no library outside the system ones got linked in.
+          if otool -L "$RUNNER_TEMP/ployenv" | tail -n +2 | grep -q -v -E '^[[:space:]]*(/usr/lib/|/System/)'; then
+            echo "::error::the darwin/arm64 binary links a non-system library"
+            otool -L "$RUNNER_TEMP/ployenv"
+            exit 1
+          fi
+          echo "PASS statically linked"
+      - name: go test
+        run: |
+          # Failures are printed as ::error:: annotations so they can be read
+          # back from the Actions API. A skipped test logs its reason in the
+          # same shape as a failed assertion, so annotations come from the
+          # --- FAIL blocks (and from panics) rather than from every
+          # "file.go:12:" line.
+          set +e
+          go test ./... -count=1 -v > test-output.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            echo "::error::go test failed (exit $code)"
+            {
+              awk '/^=== RUN   /{buf="";inbuf=1} inbuf{buf=buf $0 "\n"} /^--- FAIL: /{printf "%s",buf;inbuf=0;buf=""}' test-output.log
+              grep -E '^panic:' test-output.log
+            } | head -n 40 | while IFS= read -r line; do echo "::error::$line"; done
+            echo '----- tail -----'
+            tail -n 40 test-output.log
+          fi
+          exit $code
+
+  gates-macos-intel:
+    name: gates (macos-15-intel, darwin/amd64)
+    # The same gate for the Intel half of darwin. It is not part of the everyday
+    # gate because macos-15-intel is the slowest runner to schedule, and the code
+    # it exercises is the same darwin code the arm64 job already covers; the
+    # distinct value here is the darwin/amd64 architecture itself.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.ref, 'refs/tags/')
+      || startsWith(github.ref, 'refs/heads/develop-v')
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: gofmt must be clean
+        run: |
+          fmt=$(gofmt -l ./cmd ./internal)
+          if [ -n "$fmt" ]; then
+            echo "gofmt would change:"
+            echo "$fmt"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: the darwin/amd64 binary is static and actually runs
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/ployenv" ./cmd/ployenv
+          "$RUNNER_TEMP/ployenv" --version
+          if go version -m "$RUNNER_TEMP/ployenv" | grep -q 'cgo'; then
+            echo "::error::the darwin/amd64 binary is not static (cgo is linked in)"
+            exit 1
+          fi
+          if otool -L "$RUNNER_TEMP/ployenv" | tail -n +2 | grep -q -v -E '^[[:space:]]*(/usr/lib/|/System/)'; then
+            echo "::error::the darwin/amd64 binary links a non-system library"
+            otool -L "$RUNNER_TEMP/ployenv"
+            exit 1
+          fi
+          echo "PASS statically linked"
+      - name: go test
+        run: |
+          # Failures are printed as ::error:: annotations so they can be read
+          # back from the Actions API. A skipped test logs its reason in the
+          # same shape as a failed assertion, so annotations come from the
+          # --- FAIL blocks (and from panics) rather than from every
+          # "file.go:12:" line.
+          set +e
+          go test ./... -count=1 -v > test-output.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            echo "::error::go test failed (exit $code)"
+            {
+              awk '/^=== RUN   /{buf="";inbuf=1} inbuf{buf=buf $0 "\n"} /^--- FAIL: /{printf "%s",buf;inbuf=0;buf=""}' test-output.log
+              grep -E '^panic:' test-output.log
+            } | head -n 40 | while IFS= read -r line; do echo "::error::$line"; done
             echo '----- tail -----'
             tail -n 40 test-output.log
           fi
@@ -240,6 +383,104 @@ jobs:
         with:
           name: e2e-linux-report
           path: /tmp/e2e-report.txt
+          if-no-files-found: warn
+
+  e2e-macos:
+    name: e2e macos
+    # The darwin counterpart of e2e-linux, for the same reason: it downloads a
+    # runtime, so it is not part of the everyday gate. Like the linux job it is
+    # expressed through the product's own CLI and the public upstream sources,
+    # so this file carries no internal paths and no internal tooling.
+    #
+    # Gatekeeper and quarantine handling is a documentation matter for now (the
+    # release is unsigned by decision), so this job only asserts what an
+    # unsigned-but-intact install has to satisfy: the tool runs, and it carries
+    # no quarantine attribute.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.ref, 'refs/tags/')
+      || startsWith(github.ref, 'refs/heads/develop-v')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build the binary under test
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o "$RUNNER_TEMP/ployenv" ./cmd/ployenv
+          "$RUNNER_TEMP/ployenv" --version
+      - name: install, activate, inspect, uninstall (real filesystem, network allowed)
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/ployenv"
+          # A throw-away data root: the runner's own environment is never touched,
+          # and the assertions below can rely on it being empty.
+          #
+          # macOS gives out /var/folders/... paths, and /var is a symlink to
+          # /private/var, so the root is resolved once: the install, the PATH the
+          # product renders, and the assertions below then all agree on one form.
+          export PLOYENV_ROOT="$(cd "$(mktemp -d)" && pwd -P)"
+          NODE_VERSION=20.20.2
+          ARCH="$(uname -m)"
+          case "$ARCH" in arm64) NODE_ARCH=arm64 ;; x86_64) NODE_ARCH=x64 ;; *) NODE_ARCH="$ARCH" ;; esac
+          # The job name claims darwin/arm64, so the runner has to actually be that.
+          test "$ARCH" = "arm64"
+
+          # -y keeps the first-run setup non-interactive (there is no TTY here).
+          "$BIN" -y config --set-cache-keep true
+          "$BIN" -y install "node@$NODE_VERSION"
+
+          # 1) an installed tool must be executable on a real filesystem
+          tool="$PLOYENV_ROOT/versions/node/$NODE_VERSION/bin/node"
+          test -x "$tool"
+          echo "PASS tool is executable"
+
+          # 2) the downloaded bytes must match the checksum the upstream publishes
+          archive="$(find "$PLOYENV_ROOT/cache" -name '*.tar.gz' -type f | head -1)"
+          test -n "$archive"
+          curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" -o "$RUNNER_TEMP/sums.txt"
+          want="$(grep "node-v$NODE_VERSION-darwin-$NODE_ARCH.tar.gz\$" "$RUNNER_TEMP/sums.txt" | awk '{print $1}')"
+          got="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          test "$want" = "$got"
+          echo "PASS archive sha256 = $got (matches upstream)"
+
+          # 3) the rendered shell environment must work in a real POSIX shell
+          "$BIN" use "node@$NODE_VERSION"
+          eval "$("$BIN" env --shell bash)"
+          case "$(command -v node)" in
+            "$PLOYENV_ROOT"/*) echo "PASS node resolves inside the managed root" ;;
+            *) echo "::error::node does not resolve to the managed install"; exit 1 ;;
+          esac
+          node --version
+
+          # 4) the installed tool must really run on darwin, not merely exist -
+          #    this is also what an unsigned/quarantined install would break
+          "$tool" --version
+          if xattr -p com.apple.quarantine "$tool" 2>/dev/null; then
+            echo "::error::the installed tool carries a quarantine attribute"
+            exit 1
+          fi
+          echo "PASS installed tool runs and is not quarantined"
+
+          # 5) the reporting commands agree with what was installed
+          "$BIN" current node
+          "$BIN" which node
+          "$BIN" doctor --json
+
+          # 6) and it must clean up after itself
+          "$BIN" uninstall "node@$NODE_VERSION"
+          test ! -d "$PLOYENV_ROOT/versions/node/$NODE_VERSION"
+          echo "PASS uninstall left no version directory"
+
+          { echo "ployenv: $("$BIN" --version)"; echo "runner arch: $ARCH"; echo "node: $NODE_VERSION"; echo "archive sha256: $got"; echo "upstream sha256: $want"; } > "$RUNNER_TEMP/e2e-report.txt"
+      - name: keep the run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-macos-report
+          path: ${{ runner.temp }}/e2e-report.txt
           if-no-files-found: warn
 
   plugin-smoke:
