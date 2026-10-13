@@ -11,7 +11,8 @@ name: ci
 #   gates-macos       -> darwin/arm64: gofmt / vet / build / tests, on every push
 #   gates-macos-intel -> darwin/amd64: the same, at release points and on batch branches
 #   e2e-macos         -> darwin end-to-end install / activate / inspect / uninstall,
-#                        at release points and on manual dispatch (it downloads a runtime)
+#                        at release points, on manual dispatch, or on a batch
+#                        branch (it downloads a runtime)
 
 on:
   push:
@@ -398,6 +399,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || startsWith(github.ref, 'refs/tags/')
+      || startsWith(github.ref, 'refs/heads/develop-v')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -415,7 +417,11 @@ jobs:
           BIN="$RUNNER_TEMP/ployenv"
           # A throw-away data root: the runner's own environment is never touched,
           # and the assertions below can rely on it being empty.
-          export PLOYENV_ROOT="$(mktemp -d)"
+          #
+          # macOS gives out /var/folders/... paths, and /var is a symlink to
+          # /private/var, so the root is resolved once: the install, the PATH the
+          # product renders, and the assertions below then all agree on one form.
+          export PLOYENV_ROOT="$(cd "$(mktemp -d)" && pwd -P)"
           NODE_VERSION=20.20.2
           ARCH="$(uname -m)"
           case "$ARCH" in arm64) NODE_ARCH=arm64 ;; x86_64) NODE_ARCH=x64 ;; *) NODE_ARCH="$ARCH" ;; esac
