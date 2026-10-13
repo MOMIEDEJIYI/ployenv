@@ -31,9 +31,10 @@ that declares no `dsh.bundle` installs as a plain dependency instead of an activ
 
 ## Requirements
 
-> ⚠️ **Windows x64 only for the bundled binary.** The package ships `bin/win32-x64/ployenv.exe` and
-> therefore declares `"os": ["win32"]` / `"cpu": ["x64"]`, so **npm refuses to install it on macOS or
-> Linux**. There, install the plugin from a local directory instead and point `PLOYENV_BIN` (or
+> **Platform note.** The bundled binary is Windows x64 (`bin/win32-x64/ployenv.exe`); the package no
+> longer declares `"os"`/`"cpu"`, so npm installs it on any platform. Elsewhere, run the plugin-side
+> `setup` action - it downloads the released asset for this host (`ployenv-<os>-<arch>[.exe]`) and
+> verifies its SHA-256 against the release `SHA256SUMS.txt` - or point `PLOYENV_BIN` (or
 > `PLOYENV_ROOT`) at a ployenv you provide; the resolution order below then finds it.
 
 1. **Node.js >= 20** for the host (DSH already requires this).
@@ -283,8 +284,8 @@ and in CI (`.github/workflows/ci.yml`, job `plugin-smoke`).
 
 Installing this package is meant to be enough - no separate ployenv download:
 
-- a ployenv binary ships in the package (`bin/win32-x64/ployenv.exe` today; other platforms use the same
-  `bin/<platform>-<arch>/` layout, or a `ployenv-<platform>-<arch>` package later);
+- a ployenv binary ships in the package (`bin/win32-x64/ployenv.exe` today; the same
+  `bin/<platform>-<arch>/` layout is used for any other bundled copy later);
 - when that bundled binary is used, its data root is `<package>/data/ployenv` (passed to the child as
   `PLOYENV_ROOT`), so **uninstalling the plugin removes the installed runtimes too**;
 - if you already have your own ployenv (row `bin` / `PLOYENV_BIN` / `PLOYENV_ROOT`), the plugin
@@ -316,18 +317,20 @@ own data root. It is **plugin-side**: nothing is passed to the CLI, and no file 
 
 | Item | Value |
 |---|---|
-| Default URL | `https://github.com/MOMIEDEJIYI/ployenv/releases/latest/download/ployenv-windows-amd64.exe` - the fixed-name alias asset, so no version is hard-coded |
+| Default URL | `https://github.com/MOMIEDEJIYI/ployenv/releases/latest/download/ployenv-<os>-<arch>[.exe]` for this host (Go-style names: `windows`/`linux`/`darwin` x `amd64`/`arm64`) - the fixed-name alias asset, so no version is hard-coded |
 | Default digest | the entry for that file name in the `SHA256SUMS.txt` next to the URL; pass `sha256` to skip that fetch |
-| Writes | `data/ployenv/bin/ployenv.exe` and the provenance record `data/ployenv/setup.json` |
+| Writes | `data/ployenv/bin/ployenv(.exe)` and the provenance record `data/ployenv/setup.json`; on the Unix-likes the binary is marked executable (`0755`) |
 | Verify order | the digest is checked **before** anything is written; a mismatch exits non-zero and leaves no file (NFR-302) |
-| Platforms | `win32-x64` only (the only released asset today); other platforms fail loudly |
+| Platforms | every published target (`windows`/`linux`/`darwin` x `amd64`/`arm64`); a host without an asset fails loudly and tells you to pass `url` |
 | After setup | `bin`/`status` report `bin source: setup`, and `status` also prints `setup: <url> @ <time>` |
 | Data root | still `<package>/data/ployenv` unless row config `root` overrides it, so **uninstalling the plugin removes both the binary and the runtimes** |
 
 ## Verified / unverified
 
 - `node --check index.js` - passes (Node 22.23.3).
-- `node stub-smoke.mjs` - **13/13 clauses** (hermetic contract check).
+- `node stub-smoke.mjs` - **16/16 clauses** (hermetic contract check).
+- `setup` resolves the released asset for this host (Go-style `<os>-<arch>` names) and refuses a host without one;
+  the contract smoke drives a real download and SHA-256 check against a local source on a simulated `linux/arm64` host.
 - `setup` end-to-end against a local HTTP source - 14/14 checks: install + provenance + resolution flip +
   `status` echo, wrong digest (non-zero, nothing written, no temp left), missing checksum file, name missing
   from the checksum file, and an explicit `sha256` that skips the checksum fetch.
