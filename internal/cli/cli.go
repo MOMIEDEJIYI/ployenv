@@ -27,7 +27,21 @@ const Version = "0.3.3"
 // so a runtime with hundreds of releases does not scroll forever.
 const defaultAvailableLimit = 20
 
-const helpText = `ployenv - portable multi-runtime version manager
+// helpText is helpTextFor for the host platform.
+func helpText() string { return helpTextFor(platform.IsWindows()) }
+
+// helpTextFor takes the platform as an argument, in the same spirit as the OS
+// seams elsewhere: it is what makes both spellings of the help assertable from
+// any runner rather than only the one that happens to run there.
+func helpTextFor(onWindows bool) string {
+	shells := "bash|zsh|sh|json"
+	if onWindows {
+		shells = "pwsh|cmd|bash|json"
+	}
+	return strings.ReplaceAll(helpTemplate, "{{shells}}", shells)
+}
+
+const helpTemplate = `ployenv - portable multi-runtime version manager
 
 usage: ployenv <command> [args]
 
@@ -51,7 +65,7 @@ manage:
   ployenv use <lang>@<version> [--project]    set the global default / write .ployenv
 
 session activation (never modifies the system environment):
-  ployenv env [--shell pwsh|cmd|bash|json]    print the session environment, eval it yourself
+  ployenv env [--shell {{shells}}]    print the session environment, eval it yourself
   ployenv shell [--shell ...]                 open a child terminal with it activated
   note: "use" only records a version; activate with one of the two commands above.
 
@@ -147,7 +161,7 @@ func Run(args []string) int {
 	}()
 
 	if len(args) == 0 {
-		fmt.Print(helpText)
+		fmt.Print(helpText())
 		logx.Flush(config.RootDir())
 		return 0
 	}
@@ -156,6 +170,13 @@ func Run(args []string) int {
 	case "help", "-h", "-help", "--help", "-?", "version", "-v", "--version":
 		// Pure help/version never touches the data directory.
 	default:
+		// FR-809: without a determinable data directory every path below would
+		// silently become relative to the working directory, so the run stops
+		// here with an actionable message instead of scattering data around.
+		if err := config.RootUsable(); err != nil {
+			logx.Errorf("%v", err)
+			return 1
+		}
 		if err := maybeRunSetup(g); err != nil {
 			logx.Errorf("%v", err)
 			logx.Flush(config.RootDir())
@@ -201,7 +222,7 @@ func parseGlobals(args *[]string) globals {
 func dispatch(cmd string, rest []string, g globals) error {
 	switch cmd {
 	case "help", "-h", "-help", "--help", "-?":
-		fmt.Print(helpText)
+		fmt.Print(helpText())
 		return nil
 	case "version", "-v", "--version":
 		fmt.Printf("ployenv %s (%s/%s)\n", Version, platform.OS(), platform.Arch())

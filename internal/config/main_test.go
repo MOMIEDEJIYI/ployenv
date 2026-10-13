@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +20,16 @@ func TestMain(m *testing.M) {
 	if os.Getenv("PLOYENV_TEST_RESOLVE") != "" {
 		root, src, writable := RootInfo()
 		fmt.Printf("root=%s\nsource=%s\nwritable=%t\n", root, src, writable)
+		// RootUsable is what the CLI gates on (FR-809), so the child reports it
+		// too: a fresh process is the only way to exercise it without the
+		// once-per-process pin.
+		if err := RootUsable(); err != nil {
+			// Flattened onto one line: the message is multi-line by design, and
+			// the test-side parser reads one key per line.
+			fmt.Printf("usable=%s\n", strings.ReplaceAll(err.Error(), "\n", " | "))
+		} else {
+			fmt.Println("usable=ok")
+		}
 		os.Exit(0)
 	}
 

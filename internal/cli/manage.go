@@ -10,6 +10,7 @@ import (
 	"github.com/MOMIEDEJIYI/ployenv/internal/envx"
 	"github.com/MOMIEDEJIYI/ployenv/internal/install"
 	"github.com/MOMIEDEJIYI/ployenv/internal/logx"
+	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/resolve"
 	"github.com/MOMIEDEJIYI/ployenv/internal/runtime"
 )
@@ -128,11 +129,17 @@ func cmdUse(rest []string, g globals) error {
 }
 
 // printActivateHint explains that recording a version does not put the tools on
-// the current terminal's PATH; the session must be activated first.
+// the current terminal's PATH; the session must be activated first. The recipes
+// are the ones the current platform can run (REQ-008 A7).
 func printActivateHint() {
 	fmt.Println("note: this only records the version; it does not change PATH in the current terminal.")
-	fmt.Println("  cmd          ployenv shell")
-	fmt.Println("  PowerShell   ployenv env | Invoke-Expression")
+	if platform.IsWindows() {
+		fmt.Println("  cmd          ployenv shell")
+		fmt.Println("  PowerShell   ployenv env | Invoke-Expression")
+		return
+	}
+	fmt.Println("  bash / zsh   eval \"$(ployenv env --shell bash)\"")
+	fmt.Println("  any shell    ployenv shell")
 }
 
 // writeProjectFile sets key=value in the current directory's .ployenv,

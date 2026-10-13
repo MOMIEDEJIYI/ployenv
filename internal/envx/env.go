@@ -162,16 +162,55 @@ func (e Entry) Script(shell string) (string, error) {
 		}
 		return b.String(), nil
 	default: // bash / sh / zsh
+		// On Windows these shells are MSYS-based (Git Bash, WSL), so the paths
+		// themselves have to be translated, not just the separator (I-08).
+		osName := hostOS()
 		var b strings.Builder
 		for _, kv := range e.Vars {
-			fmt.Fprintf(&b, "export %s=%s\n", kv[0], quotePOSIX(kv[1]))
+			fmt.Fprintf(&b, "export %s=%s\n", kv[0], quotePOSIX(posixPathFor(osName, kv[1])))
 		}
 		if len(e.PathDirs) > 0 {
 			// $PATH must stay unquoted so the shell expands it.
-			fmt.Fprintf(&b, "export PATH=%s$PATH\n", quotePOSIX(strings.Join(e.PathDirs, sep)+sep))
+			dirs := posixPathsFor(osName, e.PathDirs)
+			fmt.Fprintf(&b, "export PATH=%s$PATH\n", quotePOSIX(strings.Join(dirs, sep)+sep))
 		}
 		return b.String(), nil
 	}
+}
+
+// hostOS is a seam, in the same spirit as runtime.hostOS: whether a rendered
+// script needs Windows-to-POSIX path translation depends on the host, and a
+// runner can only ever be one of them, so the rule takes the OS as an argument
+// and is assertable for both from either. Production never reassigns it.
+var hostOS = platform.OS
+
+// posixPathFor rewrites a Windows path into the form a POSIX shell on Windows
+// understands: C:\tools\node becomes /c/tools/node. MSYS/Git Bash needs this -
+// handed "C:\tools\node" it sees a directory literally named "C:\tools\node" -
+// and it is why an `env --shell bash` script used to be unusable there (I-08).
+// Anything that is not a drive path, and every path off Windows, is returned
+// unchanged.
+func posixPathFor(osName, p string) string {
+	if osName != "windows" || len(p) < 3 || p[1] != ':' {
+		return p
+	}
+	drive := p[0]
+	if !(drive >= 'A' && drive <= 'Z') && !(drive >= 'a' && drive <= 'z') {
+		return p
+	}
+	if p[2] != '\\' && p[2] != '/' {
+		return p
+	}
+	return "/" + strings.ToLower(string(drive)) + strings.ReplaceAll(p[2:], `\`, "/")
+}
+
+// posixPathsFor applies posixPathFor to a list.
+func posixPathsFor(osName string, in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		out = append(out, posixPathFor(osName, p))
+	}
+	return out
 }
 
 // pathSeparator returns the PATH separator of the *target shell*, which is not

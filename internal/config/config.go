@@ -4,6 +4,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +48,11 @@ type CacheConfig struct {
 }
 
 // DefaultRoot is where a machine without an installed copy keeps its data.
+//
+// It returns "" when the platform offers no place to put it, and callers must
+// then stop with an actionable error (FR-809): falling back to a relative path
+// would scatter versions, config and cache into whatever directory ployenv
+// happened to be started from.
 func DefaultRoot() string {
 	if platform.IsWindows() {
 		if lad := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); lad != "" {
@@ -62,9 +68,35 @@ func DefaultRoot() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return ".ployenv"
+		return ""
 	}
 	return filepath.Join(home, ".local", "share", "ployenv")
+}
+
+// ErrRootUnavailable reports that no data directory can be determined. It is the
+// error FR-809 requires instead of the relative-path fallback ployenv used to
+// take, and it names the variable that fixes the situation.
+var ErrRootUnavailable = errors.New(
+	"cannot determine a data directory: HOME and XDG_DATA_HOME are both unset.\n" +
+		"Set PLOYENV_ROOT to a writable directory and try again, e.g.:\n" +
+		"  PLOYENV_ROOT=/var/lib/ployenv ployenv list")
+
+// RootUsable reports whether a data directory could be determined at all. It
+// needs no filesystem access, so it can run before anything is created.
+func RootUsable() error {
+	dir, _, _ := RootInfo()
+	return rootUsableFor(dir)
+}
+
+// rootUsableFor is the rule behind RootUsable with the resolved directory as an
+// argument, in the same spirit as the OS seams elsewhere: it is what makes the
+// failure assertable without having to arrange an environment that cannot
+// resolve a root at all.
+func rootUsableFor(dir string) error {
+	if dir == "" {
+		return ErrRootUnavailable
+	}
+	return nil
 }
 
 // ExePath is the absolute path of the running ployenv binary.
@@ -104,11 +136,45 @@ var (
 	rootWrite bool
 )
 
+// systemBinDirs are the directories a system package manager installs into. They
+// sit on PATH, so a binary living there must not treat its own directory as a
+// place for user data (see portableAllowedFor).
+var systemBinDirs = []string{
+	"/bin", "/sbin", "/usr/bin", "/usr/sbin",
+	"/usr/local/bin", "/usr/local/sbin",
+}
+
+// portableAllowedFor reports whether the portable rule - keeping the data beside
+// the executable - may be used, for this platform, directory and user.
+//
+// On Windows it always applies: that is the layout the tool was built around, and
+// a program's own directory is normally user-writable there. On the Unix-likes a
+// system bin directory IS writable for root, so `sudo ployenv install ...` would
+// otherwise drop versions/, cache/ and config.json into /usr/local/bin - a
+// directory that belongs to the package manager. Running as root disables the
+// rule outright for the same reason. Taking all three as arguments is what makes
+// every combination assertable from any runner.
+func portableAllowedFor(osName, exeDir string, isRoot bool) bool {
+	if osName == "windows" {
+		return true
+	}
+	if isRoot {
+		return false
+	}
+	dir := filepath.ToSlash(filepath.Clean(exeDir))
+	for _, sys := range systemBinDirs {
+		if dir == sys {
+			return false
+		}
+	}
+	return true
+}
+
 func resolveRoot() {
 	rootOnce.Do(func() {
 		if v := strings.TrimSpace(os.Getenv("PLOYENV_ROOT")); v != "" {
 			rootDir, rootSrc = filepath.Clean(v), RootFromEnv
-		} else if dir := ExeDir(); dir != "" && dirWritable(dir) {
+		} else if dir := ExeDir(); dir != "" && portableAllowedFor(platform.OS(), dir, platform.IsRoot()) && dirWritable(dir) {
 			// Portable by default: the data lives beside the binary, so the
 			// whole folder can be moved, copied or backed up as one unit.
 			rootDir, rootSrc = dir, RootFromExeDir
@@ -137,7 +203,7 @@ func dirWritable(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, platform.DirPerm()); err != nil {
 		return false
 	}
 	f, err := os.CreateTemp(dir, ".ployenv-wtest-*")
@@ -172,8 +238,13 @@ func CacheKeep() bool {
 	return c.Cache != nil && c.Cache.Keep
 }
 
-// LogsDir is the diagnostics log directory.
+// LogsDir is the diagnostics log directory. It is "" when no data directory
+// could be determined, so diagnostics are dropped rather than written into a
+// relative "logs" folder next to the working directory (FR-809).
 func LogsDir() string {
+	if RootDir() == "" {
+		return ""
+	}
 	cfg := Load()
 	sub := "logs"
 	if cfg.Logs != nil && strings.TrimSpace(cfg.Logs.Dir) != "" {
@@ -216,7 +287,7 @@ func Save(cfg *Config) error {
 	if root == "" {
 		root = RootDir()
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, platform.DirPerm()); err != nil {
 		return err
 	}
 	stored := *cfg
@@ -234,13 +305,13 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, "config.json"), append(data, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(root, "config.json"), append(data, '\n'), platform.FilePerm())
 }
 
 // EnsureRoot creates the directory layout ployenv needs.
 func EnsureRoot() error {
 	for _, d := range []string{RootDir(), VersionsDir(), CacheDir()} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, platform.DirPerm()); err != nil {
 			return err
 		}
 	}

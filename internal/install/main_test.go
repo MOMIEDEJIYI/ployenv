@@ -90,6 +90,14 @@ func goIndexJSON(ver, file, sha string) string {
 // exactly what the Go plan expects) holding files, with the entry names given.
 func writeArchive(t *testing.T, dst string, files map[string]string) {
 	t.Helper()
+	writeArchiveMode(t, dst, files, 0o755)
+}
+
+// writeArchiveMode is writeArchive with an explicit Unix file mode, so a test can
+// build an archive whose tool lost its execute bit (FR-808). A zip cannot carry
+// the mode the way a tar does, so the parameter only affects the tar branch.
+func writeArchiveMode(t *testing.T, dst string, files map[string]string, mode int64) {
+	t.Helper()
 	f, err := os.Create(dst)
 	if err != nil {
 		t.Fatalf("creating %s: %v", dst, err)
@@ -112,7 +120,7 @@ func writeArchive(t *testing.T, dst string, files map[string]string) {
 		gz := gzip.NewWriter(f)
 		tw := tar.NewWriter(gz)
 		for name, body := range files {
-			hdr := &tar.Header{Name: name, Mode: 0o755, Size: int64(len(body))}
+			hdr := &tar.Header{Name: name, Mode: mode, Size: int64(len(body))}
 			if err := tw.WriteHeader(hdr); err != nil {
 				t.Fatalf("tar header %s: %v", name, err)
 			}

@@ -41,8 +41,13 @@ func maybeRunSetup(g globals) error {
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		switch strings.ToLower(strings.TrimSpace(line)) {
 		case "n", "no":
-			return fmt.Errorf("cancelled. To pick a different data directory, set PLOYENV_ROOT first, e.g.:\n" +
-				`  setx PLOYENV_ROOT "D:\PloyEnv"   (then reopen the terminal)`)
+			// The recipe has to be one the user's platform can actually run:
+			// setx exists only on Windows (REQ-008 A7).
+			hint := `  export PLOYENV_ROOT=/path/to/ployenv   (then restart the shell)`
+			if platform.IsWindows() {
+				hint = `  setx PLOYENV_ROOT "D:\PloyEnv"   (then reopen the terminal)`
+			}
+			return fmt.Errorf("cancelled. To pick a different data directory, set PLOYENV_ROOT first, e.g.:\n%s", hint)
 		}
 	}
 

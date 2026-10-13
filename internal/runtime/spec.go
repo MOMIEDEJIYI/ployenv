@@ -29,6 +29,10 @@ const (
 	LayoutFlatten
 	// LayoutNuGet flattens a NuGet package's tools/ folder and drops metadata.
 	LayoutNuGet
+	// LayoutMacJDK normalises a macOS JDK bundle: Adoptium's darwin archive
+	// nests the actual JDK home two levels deep, as <wrapper>/Contents/Home,
+	// so a plain flatten would leave Contents/ where bin/ is expected.
+	LayoutMacJDK
 )
 
 // Plan describes how to obtain one exact version.

@@ -132,11 +132,33 @@ jobs:
           cache: false
       - name: build all targets
         run: |
+          # CGO pinned off: the published binaries are meant to be static
+          # (REQ-008 FR-801), and leaving it to the runner makes the result
+          # depend on whether a C toolchain happens to be installed.
+          export CGO_ENABLED=0
           GOOS=linux  GOARCH=amd64 go build ./...
           GOOS=linux  GOARCH=arm64 go build ./...
           GOOS=darwin GOARCH=amd64 go build ./...
           GOOS=darwin GOARCH=arm64 go build ./...
           GOOS=windows GOARCH=arm64 go build ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+      - name: linux/amd64 artifact is static and actually runs
+        run: |
+          # Compiling proves nothing about the result, so one target is built
+          # for real, run, and checked for a cgo dependency (FR-801).
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w' -o /tmp/ployenv-linux-amd64 ./cmd/ployenv
+          /tmp/ployenv-linux-amd64 --version
+          if go version -m /tmp/ployenv-linux-amd64 | grep -q 'cgo'; then
+            echo "::error::the linux/amd64 binary is not static (cgo is linked in)"
+            exit 1
+          fi
+          if ldd /tmp/ployenv-linux-amd64 2>&1 | grep -q 'not a dynamic executable'; then
+            echo "PASS statically linked"
+          else
+            echo "::error::the linux/amd64 binary is dynamically linked"
+            ldd /tmp/ployenv-linux-amd64 || true
+            exit 1
+          fi
 
   plugin-smoke:
     name: dsh plugin smoke

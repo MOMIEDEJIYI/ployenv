@@ -10,6 +10,7 @@ import (
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
 	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
+	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/runtime"
 )
 
@@ -145,6 +146,106 @@ func TestEnsureRollsBackWhenTheArchiveCannotBeUsed(t *testing.T) {
 
 // The post-install self-check only warns: the files are in place, and a tool that
 // refuses to run is worth reporting but not worth deleting a finished install.
+func TestEnsureRejectsAToolWithoutTheExecuteBit(t *testing.T) {
+	// FR-808 / REQ-008 A2: the reverse assertion. An archive whose tool carries
+	// no execute bit must fail the install and roll back, rather than leave a
+	// version directory that reports success and breaks on first use.
+	if platform.IsWindows() {
+		t.Skip("execute bits do not exist on Windows")
+	}
+	resetSandbox(t)
+
+	path := filepath.Join(t.TempDir(), goArchiveName("1.26.9"))
+	writeArchiveMode(t, path, map[string]string{"go/bin/" + goToolName(): "binary content"}, 0o644)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the archive: %v", err)
+	}
+	newGoSource(t, "1.26.9", body, "")
+
+	if _, _, err := Ensure(goSpec(t), "1.26.9", Options{}); err == nil {
+		t.Fatal("an archive whose tool is not executable must fail the install")
+	} else if !strings.Contains(err.Error(), "not executable") {
+		t.Errorf("the error must name the problem, got: %v", err)
+	}
+	if fsutil.DirExists(config.VersionDir("go", "1.26.9")) {
+		t.Error("the half-installed version directory must be rolled back")
+	}
+}
+
+func TestAssertExecutable(t *testing.T) {
+	// A unit-level companion to the end-to-end test above: the rule itself, both
+	// directions, so a regression is pinpointed rather than merely detected.
+	spec := goSpec(t)
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(bin, goToolName())
+
+	if err := os.WriteFile(p, []byte("tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := assertExecutable(spec, dir, "1.27.2"); err != nil {
+		t.Errorf("an executable tool must pass on every platform: %v", err)
+	}
+
+	if err := os.Chmod(p, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := assertExecutable(spec, dir, "1.27.2")
+	if platform.IsWindows() {
+		if err != nil {
+			t.Errorf("the check must be a no-op on Windows, got: %v", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatal("a tool without any execute bit must be rejected")
+	}
+	if !strings.Contains(err.Error(), "not executable") || !strings.Contains(err.Error(), "0644") {
+		t.Errorf("the error must name the problem and the mode, got: %v", err)
+	}
+}
+
+// The rule behind FR-808, asserted for every OS from any runner: only the
+// Unix-likes care, and only about any of the three execute bits.
+func TestExecutableFor(t *testing.T) {
+	for _, tc := range []struct {
+		osName string
+		mode   os.FileMode
+		want   bool
+	}{
+		{"windows", 0o644, true},
+		{"windows", 0o000, true},
+		{"linux", 0o755, true},
+		{"linux", 0o700, true},
+		{"linux", 0o644, false},
+		{"linux", 0o000, false},
+		{"darwin", 0o755, true},
+		{"darwin", 0o644, false},
+	} {
+		if got := executableFor(tc.osName, tc.mode); got != tc.want {
+			t.Errorf("executableFor(%s, %04o) = %v, want %v", tc.osName, tc.mode, got, tc.want)
+		}
+	}
+	// The host accessor must follow the platform, otherwise the branch the
+	// product actually runs stays untested.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "tool")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := executableFor(platform.OS(), st.Mode()), platform.IsWindows(); got != want {
+		t.Errorf("on %s a 0644 file = %v, want %v", platform.OS(), got, want)
+	}
+}
+
 func TestEnsureWarnsWhenTheSelfCheckFails(t *testing.T) {
 	resetSandbox(t)
 	// The "tool" is a text file: it exists, so HasBinary is satisfied, but it
@@ -340,6 +441,88 @@ func TestApplyLayout(t *testing.T) {
 		}
 		if fsutil.DirExists(filepath.Join(dir, "wrapper")) {
 			t.Error("the wrapper must be removed")
+		}
+	})
+
+	// A1 / REQ-008: Adoptium's macOS archive is a bundle. The real JDK home sits
+	// at <wrapper>/Contents/Home, so a single flatten leaves Contents/ where
+	// bin/ is expected and the install used to roll back with "not found after
+	// extraction" on every macOS machine.
+	t.Run("mac-jdk flatten descends into Contents/Home", func(t *testing.T) {
+		dir := t.TempDir()
+		home := filepath.Join(dir, "jdk-21.0.12.1+1", "Contents", "Home")
+		if err := os.MkdirAll(filepath.Join(home, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(home, "lib"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(home, "..", "MacOS"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// The tool is created under the name the spec will look for, so the
+		// assertion holds on every runner rather than only on the Unix-likes.
+		if err := os.WriteFile(filepath.Join(home, "bin", platform.ExeName("java")), []byte("binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := applyLayout(runtime.LayoutMacJDK, dir); err != nil {
+			t.Fatalf("applyLayout: %v", err)
+		}
+		if !fsutil.FileExists(filepath.Join(dir, "bin", platform.ExeName("java"))) {
+			t.Error("after the mac-jdk layout the JDK home must sit at the version root")
+		}
+		if fsutil.DirExists(filepath.Join(dir, "Contents")) {
+			t.Error("the Contents/ level must be gone")
+		}
+		if fsutil.DirExists(filepath.Join(dir, "jdk-21.0.12.1+1")) {
+			t.Error("the tarball wrapper must be removed")
+		}
+
+		// The point of the whole exercise: the spec must now find the tool, so
+		// the install neither rolls back nor warns.
+		spec := runtime.Lookup("java")
+		if spec == nil {
+			t.Fatal("java spec missing")
+		}
+		if !spec.HasBinary(dir, "21.0.12.1+1") {
+			t.Error("HasBinary must find bin/java after the mac-jdk layout")
+		}
+	})
+
+	t.Run("mac-jdk layout still handles a flat archive", func(t *testing.T) {
+		// A non-bundle archive (or a future Adoptium layout change) must not be
+		// damaged: with no Contents/ the plain flatten stands.
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "wrapper", "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "wrapper", "bin", "java"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := applyLayout(runtime.LayoutMacJDK, dir); err != nil {
+			t.Fatalf("applyLayout: %v", err)
+		}
+		if !fsutil.FileExists(filepath.Join(dir, "bin", "java")) {
+			t.Error("a flat archive must end up at bin/java as well")
+		}
+	})
+
+	t.Run("mac-jdk layout keeps an already-normalised tree", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "bin", "java"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "release"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := applyLayout(runtime.LayoutMacJDK, dir); err != nil {
+			t.Fatalf("applyLayout: %v", err)
+		}
+		if !fsutil.FileExists(filepath.Join(dir, "bin", "java")) {
+			t.Error("an already-normalised tree must survive untouched")
 		}
 	})
 
