@@ -15,6 +15,8 @@ const goIndexJSON = `[
   {"version":"go1.27.2","stable":true,"files":[
     {"filename":"go1.27.2.windows-amd64.zip","os":"windows","arch":"amd64","kind":"archive","sha256":"11f27"},
     {"filename":"go1.27.2.linux-amd64.tar.gz","os":"linux","arch":"amd64","kind":"archive","sha256":"11727"},
+    {"filename":"go1.27.2.darwin-amd64.tar.gz","os":"darwin","arch":"amd64","kind":"archive","sha256":"da12764"},
+    {"filename":"go1.27.2.darwin-arm64.tar.gz","os":"darwin","arch":"arm64","kind":"archive","sha256":"da127a"},
     {"filename":"go1.27.2.darwin-arm64.pkg","os":"darwin","arch":"arm64","kind":"installer","sha256":"dd127"}
   ]},
   {"version":"go1.26.4","stable":true,"files":[
@@ -121,15 +123,29 @@ func TestGoPlanPicksTheArchiveForThisPlatform(t *testing.T) {
 	if plan.SHA256 == "" {
 		t.Fatal("the index publishes a sha256, so the plan must carry it")
 	}
-	switch platform.OS() + "/" + platform.Arch() {
-	case "windows/amd64":
-		if plan.File != "go1.27.2.windows-amd64.zip" {
-			t.Fatalf("File = %q", plan.File)
-		}
-	case "linux/amd64":
-		if plan.File != "go1.27.2.linux-amd64.tar.gz" {
-			t.Fatalf("File = %q", plan.File)
-		}
+	// The index carries one archive per platform and the plan has to pick the
+	// host's own. Asserting every pair here means the darwin branches are
+	// covered on whatever runner this is (a runner can only ever execute one
+	// platform's code path, which is how the darwin gap went unnoticed).
+	for _, tc := range []struct{ osName, arch, file string }{
+		{"windows", "amd64", "go1.27.2.windows-amd64.zip"},
+		{"linux", "amd64", "go1.27.2.linux-amd64.tar.gz"},
+		{"darwin", "amd64", "go1.27.2.darwin-amd64.tar.gz"},
+		// darwin also publishes a .pkg, so the archive is what has to be picked
+		// here: an installer is not something to unpack.
+		{"darwin", "arm64", "go1.27.2.darwin-arm64.tar.gz"},
+	} {
+		t.Run(tc.osName+"/"+tc.arch, func(t *testing.T) {
+			withOS(t, tc.osName)
+			withArch(t, tc.arch)
+			plan, err := goPlan("go1.27.2")
+			if err != nil {
+				t.Fatalf("goPlan: %v", err)
+			}
+			if plan.File != tc.file {
+				t.Fatalf("File = %q, want %q", plan.File, tc.file)
+			}
+		})
 	}
 
 	// The version exists but only as an installer: no archive, so no plan.
