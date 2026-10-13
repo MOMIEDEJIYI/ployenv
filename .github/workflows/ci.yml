@@ -402,12 +402,17 @@ jobs:
             $ldd = (& ldd $bin 2>&1 | Out-String)
             if ($ldd -notmatch 'not a dynamic executable') { throw "not statically linked: $ldd" }
             Write-Host 'PASS static (ldd)'
+            # GNU ldd reports a static binary as "not a dynamic executable" and exits 1, and the
+            # runner turns a lingering $LASTEXITCODE into the exit code of the whole step - so a
+            # step where every check passed would still be reported as failed.
+            $LASTEXITCODE = 0
           }
           if ($want -like 'darwin/*') {
             $libs = @(& otool -L $bin | Select-Object -Skip 1 | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*(/usr/lib/|/System/)' })
             if ($libs.Count -gt 0) { throw "the darwin binary links non-system libraries: $($libs -join '; ')" }
             Write-Host 'PASS no non-system dylib'
           }
+          $LASTEXITCODE = 0
       - uses: actions/download-artifact@v4
         with:
           name: release-sums
@@ -415,6 +420,14 @@ jobs:
       - name: the cross-built asset must be the same bytes as this native build
         shell: pwsh
         run: |
+          # windows/amd64 is excluded on purpose: its published asset is the binary committed in the
+          # repository (option B), never a build of this tree, so no rebuild can match it. That
+          # anchor is owned by build.ps1 -Package and by the asset checker (R3/R11), not here.
+          if ('${{ matrix.target }}' -eq 'windows-amd64') {
+            Write-Host 'SKIP packaged-equals-native  windows/amd64 ships the committed binary (option B)'
+            $LASTEXITCODE = 0
+            exit 0
+          }
           $sums = 'dist-sums/SHA256SUMS.txt'
           if (-not (Test-Path -LiteralPath $sums)) { throw "the checksums artifact is missing: $sums" }
           $name = 'ployenv-' + '${{ matrix.target }}' + '${{ matrix.ext }}'
@@ -425,7 +438,7 @@ jobs:
           if ($null -eq $want) { throw "SHA256SUMS.txt does not list $name" }
           $got = (Get-FileHash -LiteralPath ('./ployenv-native' + '${{ matrix.ext }}') -Algorithm SHA256).Hash
           if ($got -ne $want) { throw "$name is $want as published but $got when built natively on this runner" }
-          Write-Host "PASS packaged-equals-native  $name $got"
+          Write-Host "PASS packaged-equals-native  $name $got (cross build and native build agree byte for byte)"
 
   e2e-linux:
     name: e2e linux
