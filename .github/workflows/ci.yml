@@ -50,12 +50,18 @@ jobs:
         shell: bash
         run: |
           # 失败时把失败测试打印成 ::error:: 注解（可从 Actions API 读到，便于定位）
+          # A skipped test logs its reason in the same shape as a failed
+          # assertion, so annotations come from the --- FAIL blocks (and from
+          # panics) rather than from every "file.go:12:" line.
           set +e
           go test ./... -count=1 -v > test-output.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
             echo "::error::go test failed (exit $code)"
-            grep -E '^(--- FAIL|FAIL|panic:|\s+.*_test\.go:[0-9]+:)' test-output.log | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            {
+              awk '/^=== RUN   /{buf="";inbuf=1} inbuf{buf=buf $0 "\n"} /^--- FAIL: /{printf "%s",buf;inbuf=0;buf=""}' test-output.log
+              grep -E '^panic:' test-output.log
+            } | head -n 40 | while IFS= read -r line; do echo "::error::$line"; done
             echo '----- tail -----'
             tail -n 40 test-output.log
           fi
@@ -108,13 +114,19 @@ jobs:
       - name: go test
         run: |
           # Failures are printed as ::error:: annotations so they can be read
-          # back from the Actions API.
+          # back from the Actions API. A skipped test logs its reason in the
+          # same shape as a failed assertion, so annotations come from the
+          # --- FAIL blocks (and from panics) rather than from every
+          # "file.go:12:" line.
           set +e
           go test ./... -count=1 -v > test-output.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
             echo "::error::go test failed (exit $code)"
-            grep -E '^(--- FAIL|FAIL|panic:|\s+.*_test\.go:[0-9]+:)' test-output.log | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            {
+              awk '/^=== RUN   /{buf="";inbuf=1} inbuf{buf=buf $0 "\n"} /^--- FAIL: /{printf "%s",buf;inbuf=0;buf=""}' test-output.log
+              grep -E '^panic:' test-output.log
+            } | head -n 40 | while IFS= read -r line; do echo "::error::$line"; done
             echo '----- tail -----'
             tail -n 40 test-output.log
           fi
@@ -165,12 +177,20 @@ jobs:
           echo "PASS statically linked"
       - name: go test
         run: |
+          # Failures are printed as ::error:: annotations so they can be read
+          # back from the Actions API. A skipped test logs its reason in the
+          # same shape as a failed assertion, so annotations come from the
+          # --- FAIL blocks (and from panics) rather than from every
+          # "file.go:12:" line.
           set +e
           go test ./... -count=1 -v > test-output.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
             echo "::error::go test failed (exit $code)"
-            grep -E '^(--- FAIL|FAIL|panic:|\s+.*_test\.go:[0-9]+:)' test-output.log | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            {
+              awk '/^=== RUN   /{buf="";inbuf=1} inbuf{buf=buf $0 "\n"} /^--- FAIL: /{printf "%s",buf;inbuf=0;buf=""}' test-output.log
+              grep -E '^panic:' test-output.log
+            } | head -n 40 | while IFS= read -r line; do echo "::error::$line"; done
             echo '----- tail -----'
             tail -n 40 test-output.log
           fi
