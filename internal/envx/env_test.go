@@ -77,13 +77,22 @@ func TestPathSeparatorPerShell(t *testing.T) {
 		}
 	}
 	e := sampleEntry()
+	// The expected spelling depends on the host: on Windows the POSIX shells are
+	// MSYS-based, so the paths themselves are translated (A6) while the separator
+	// stays ':'.
+	wantDirs := strings.Join(posixPathsFor(hostOS(), e.PathDirs), ":")
 	for _, shell := range []string{"bash", "sh", "zsh", "weird-shell"} {
 		out, err := e.Script(shell)
 		if err != nil {
 			t.Fatalf("Script(%q) returned an error: %v", shell, err)
 		}
-		if !strings.Contains(out, quotePOSIX(strings.Join(e.PathDirs, ":")+":")) {
+		if !strings.Contains(out, quotePOSIX(wantDirs+":")) {
 			t.Errorf("Script(%q) must join with ':' (not the platform separator):\n%s", shell, out)
+		}
+		// The translation is Windows-only by design: off Windows the paths
+		// already are how that shell addresses them.
+		if hostOS() == "windows" && strings.Contains(out, `C:\`) {
+			t.Errorf("Script(%q) must not hand a POSIX shell a Windows path:\n%s", shell, out)
 		}
 	}
 }
@@ -94,11 +103,56 @@ func TestScriptPOSIXKeepsDollarExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Script(bash) returned an error: %v", err)
 	}
-	if !strings.Contains(out, quotePOSIX(strings.Join(e.PathDirs, ":")+":")+"$PATH") {
+	wantDirs := strings.Join(posixPathsFor(hostOS(), e.PathDirs), ":")
+	if !strings.Contains(out, quotePOSIX(wantDirs+":")+"$PATH") {
 		t.Errorf("Script(bash) must keep $PATH outside the literal:\n%s", out)
 	}
 	if strings.Contains(out, `\$PATH`) {
 		t.Errorf("Script(bash) escaped $PATH, so it will not expand:\n%s", out)
+	}
+}
+
+// A6 / REQ-008: MSYS/Git Bash addresses a Windows path as /c/..., so an
+// `env --shell bash` script that carried "C:\tools\node" was unusable there. The
+// rewrite is asserted for both platforms from any runner, and the cases it must
+// leave alone are spelled out.
+func TestPosixPathFor(t *testing.T) {
+	for _, tc := range []struct {
+		osName, in, want string
+	}{
+		{"windows", `C:\tools\node`, "/c/tools/node"},
+		{"windows", `c:\tools`, "/c/tools"},
+		{"windows", `D:/mixed/slashes`, "/d/mixed/slashes"},
+		{"windows", `C:\`, "/c/"},
+		// Not a drive path, or not Windows: untouched.
+		{"windows", `C:`, `C:`},
+		{"windows", `1:\weird`, `1:\weird`},
+		{"windows", `\\server\share`, `\\server\share`},
+		{"windows", `relative\path`, `relative\path`},
+		{"windows", `/already/posix`, `/already/posix`},
+		{"linux", `/usr/local/bin`, `/usr/local/bin`},
+		{"darwin", `C:\tools\node`, `C:\tools\node`},
+		{"", "", ""},
+	} {
+		if got := posixPathFor(tc.osName, tc.in); got != tc.want {
+			t.Errorf("posixPathFor(%q, %q) = %q, want %q", tc.osName, tc.in, got, tc.want)
+		}
+	}
+
+	// The host accessor must follow the platform, otherwise the branch the
+	// product actually runs per platform stays untested.
+	for _, osName := range []string{"windows", "linux", "darwin"} {
+		saved := hostOS
+		hostOS = func() string { return osName }
+		out, err := sampleEntry().Script("bash")
+		hostOS = saved
+		if err != nil {
+			t.Fatalf("Script(bash) on %s: %v", osName, err)
+		}
+		wantDirs := strings.Join(posixPathsFor(osName, sampleEntry().PathDirs), ":")
+		if !strings.Contains(out, quotePOSIX(wantDirs+":")) {
+			t.Errorf("on %s the bash script must use %q:\n%s", osName, wantDirs, out)
+		}
 	}
 }
 

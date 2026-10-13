@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
+	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/resolve"
 	"github.com/MOMIEDEJIYI/ployenv/internal/runtime"
 )
@@ -161,6 +162,19 @@ func TestUseSetsTheGlobalDefault(t *testing.T) {
 	// Recording a version is not the same as activating it; say so.
 	if !strings.Contains(out, "does not change PATH") || !strings.Contains(out, "ployenv shell") {
 		t.Errorf("use must explain how to activate:\n%s", out)
+	}
+	// A7 / REQ-008: the recipes have to be ones this platform can actually run.
+	if platform.IsWindows() {
+		if !strings.Contains(out, "PowerShell") || !strings.Contains(out, "Invoke-Expression") {
+			t.Errorf("on Windows the hint must show the Windows recipes:\n%s", out)
+		}
+	} else {
+		if strings.Contains(out, "PowerShell") || strings.Contains(out, "Invoke-Expression") {
+			t.Errorf("off Windows the hint must not offer PowerShell:\n%s", out)
+		}
+		if !strings.Contains(out, `eval "$(ployenv env --shell bash)"`) {
+			t.Errorf("off Windows the hint must show the POSIX recipe:\n%s", out)
+		}
 	}
 	if got := readConfig(t).Defaults["node"]; got != "21.0.0" {
 		t.Errorf("stored default = %q", got)
