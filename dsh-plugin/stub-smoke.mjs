@@ -13,7 +13,7 @@ import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
 import { Readable } from 'node:stream'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -223,6 +223,76 @@ await clause('FR-303-setup-fails-clean', 'setup fails loudly offline and never s
   assert.notStrictEqual(res.exitCode, 0, 'setup against a dead URL must not report success')
   assert.strictEqual(calls.length, before, 'setup must not spawn the CLI')
   return 'exitCode=' + res.exitCode
+})
+
+await clause('FR-305-setup-platforms', 'setup resolves a release asset for every published target', async () => {
+  // Sentinel only: this proves the table is present, not that the mapping is
+  // right - the behaviour is covered by the two clauses below.
+  const need = ['RELEASE_OS', 'RELEASE_ARCH', 'releaseTargetFor', 'assetNameFor', 'SETUP_TARGETS']
+  const missing = need.filter((name) => !sourceText.includes(name))
+  assert.deepStrictEqual(missing, [], 'setup target mapping is missing: ' + missing.join(','))
+  const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  assert.strictEqual(pkg.os, undefined, 'package.json must not declare os (REQ-008 FR-805)')
+  assert.strictEqual(pkg.cpu, undefined, 'package.json must not declare cpu (REQ-008 FR-805)')
+  const targets = ['windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64']
+  const absent = targets.filter((t) => !sourceText.includes("'" + t + "'"))
+  assert.deepStrictEqual(absent, [], 'SETUP_TARGETS is missing: ' + absent.join(','))
+  return 'six targets, no os/cpu gate'
+})
+
+await clause('FR-805-setup-cross-platform', 'setup installs a verified asset on a non-Windows host', async () => {
+  const http = await import('node:http')
+  const { createHash } = await import('node:crypto')
+  const asset = Buffer.from('#!/bin/sh\necho fake\n', 'utf8')
+  const digest = createHash('sha256').update(asset).digest('hex')
+  const name = 'ployenv-linux-arm64'
+  const server = http.createServer((req, res) => { res.statusCode = 200; res.end(req.url === '/SHA256SUMS.txt' ? digest + '  ' + name + '\n' : asset) })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const url = 'http://127.0.0.1:' + server.address().port + '/' + name
+  const realPlatform = process.platform
+  const realArch = process.arch
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+  Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true })
+  let detail = ''
+  try {
+    const fresh = await import(pathToFileURL(pluginPath).href + '?cross=1')
+    const tools2 = []
+    fresh.apply({ get: () => undefined, commands: { register: () => () => {} }, tools: { register: (x) => { tools2.push(x); return () => {} } } }, { bin: fakeBin })
+    const res = JSON.parse(await tools2[0].execute({ action: 'setup', url }, { signal: undefined }))
+    assert.strictEqual(res.exitCode, 0, 'setup must install on linux/arm64: ' + JSON.stringify(res).slice(0, 160))
+    assert.ok(String(res.stdout || '').includes('ployenv'), 'setup must report the installed binary')
+    if (realPlatform !== 'win32') {
+      const mode = statSync(String(res.stdout)).mode
+      assert.ok((mode & 0o111) !== 0, 'the installed binary must be executable on the Unix-likes; mode=' + mode.toString(8))
+    }
+    detail = 'installed ' + name + ', verified its SHA-256' + (realPlatform === 'win32' ? '' : ' and its executable bit')
+  } finally {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
+    Object.defineProperty(process, 'arch', { value: realArch, configurable: true })
+    server.close()
+  }
+  return detail
+})
+
+await clause('FR-305-setup-unsupported-host', 'a host without an asset fails loudly and names every published target', async () => {
+  const realPlatform = process.platform
+  const realArch = process.arch
+  Object.defineProperty(process, 'platform', { value: 'freebsd', configurable: true })
+  Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+  try {
+    const fresh = await import(pathToFileURL(pluginPath).href + '?freebsd=1')
+    const tools3 = []
+    fresh.apply({ get: () => undefined, commands: { register: () => () => {} }, tools: { register: (x) => { tools3.push(x); return () => {} } } }, { bin: fakeBin })
+    const res = JSON.parse(await tools3[0].execute({ action: 'setup' }, { signal: undefined }))
+    assert.notStrictEqual(res.exitCode, 0, 'setup must not claim success on a host with no asset')
+    const text = String(res.error || '') + String(res.stderr || '')
+    const absent = ['windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64'].filter((t) => !text.includes(t))
+    assert.deepStrictEqual(absent, [], 'the error must name every published target; missing: ' + absent.join(','))
+    return 'loud error names six targets'
+  } finally {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
+    Object.defineProperty(process, 'arch', { value: realArch, configurable: true })
+  }
 })
 
 await clause('A5-help', 'the slash command answers help without calling the CLI', async () => {

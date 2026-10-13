@@ -18,12 +18,6 @@
     "check": "node --check index.js",
     "test": "node stub-smoke.mjs"
   },
-  "os": [
-    "win32"
-  ],
-  "cpu": [
-    "x64"
-  ],
   "engines": {
     "node": ">=20.18"
   },

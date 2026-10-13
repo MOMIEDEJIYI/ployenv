@@ -26,7 +26,7 @@
  */
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -49,12 +49,29 @@ const PLUGIN_DATA_ROOT = join(PLUGIN_DIR, 'data', 'ployenv')
 const SELF_INSTALLED_BIN = join(PLUGIN_DATA_ROOT, 'bin', WINDOWS ? 'ployenv.exe' : 'ployenv')
 /** Provenance of the last successful 'setup' (URL, digest, time). */
 const SETUP_RECORD = join(PLUGIN_DATA_ROOT, 'setup.json')
-/** Only this platform has a released binary today (REQ-003 §6, P0). */
-const SETUP_PLATFORM = 'win32-x64'
 /** Checksum file shipped next to every release asset. */
 const SETUP_SUMS_NAME = 'SHA256SUMS.txt'
+/** Release assets use Go's OS/arch words, not Node's (REQ-008 §3.1). */
+const RELEASE_OS = { win32: 'windows', linux: 'linux', darwin: 'darwin' }
+const RELEASE_ARCH = { x64: 'amd64', arm64: 'arm64' }
+/** The release target of a Node platform/arch pair, e.g. windows-amd64. */
+function releaseTargetFor(platform, arch) {
+  const osName = RELEASE_OS[platform]
+  const archName = RELEASE_ARCH[arch]
+  return osName === undefined || archName === undefined ? undefined : osName + '-' + archName
+}
+/** The fixed-name alias asset of a release target (uploaded for every release). */
+function assetNameFor(target) {
+  return 'ployenv-' + target + (target.startsWith('windows-') ? '.exe' : '')
+}
+/** The targets the release pipeline publishes assets for. */
+const SETUP_TARGETS = ['windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64']
+/** This host's release target, or undefined when no asset matches this host. */
+const SETUP_TARGET = releaseTargetFor(process.platform, process.arch)
 /** Zero-config default: the fixed-name alias asset of the newest release. */
-const DEFAULT_SETUP_URL = 'https://github.com/MOMIEDEJIYI/ployenv/releases/latest/download/ployenv-windows-amd64.exe'
+const DEFAULT_SETUP_URL = SETUP_TARGET === undefined || !SETUP_TARGETS.includes(SETUP_TARGET)
+  ? undefined
+  : 'https://github.com/MOMIEDEJIYI/ployenv/releases/latest/download/' + assetNameFor(SETUP_TARGET)
 
 /** Bundled binary candidates, most specific first (REQ-003 §3.1). */
 function bundledCandidates() {
@@ -531,12 +548,14 @@ function flagValue(flags, name) {
  */
 async function runSetup(state, request, timeoutMs) {
   const base = { action: 'setup', bin: state.options.bin }
-  const platform = process.platform + '-' + process.arch
-  if (platform !== SETUP_PLATFORM) {
-    const reason = 'setup is only implemented for ' + SETUP_PLATFORM + ' (this host is ' + platform + ')'
+  const requested = optionalText(request.url)
+  const url = requested !== undefined ? requested : DEFAULT_SETUP_URL
+  if (url === undefined) {
+    const reason = 'setup has no released asset for ' + process.platform + '-' + process.arch
+      + '; published targets: ' + SETUP_TARGETS.join(', ')
+      + '. Pass --url to install a build from a mirror or a custom source.'
     return Object.assign(base, { exitCode: 1, stdout: '', stderr: 'error: ' + reason + '\n', error: reason })
   }
-  const url = optionalText(request.url) !== undefined ? request.url : DEFAULT_SETUP_URL
   const name = url.slice(url.lastIndexOf('/') + 1)
   if (name.length === 0) {
     const reason = 'setup needs a URL that ends in a file name: ' + JSON.stringify(url)
@@ -564,6 +583,9 @@ async function runSetup(state, request, timeoutMs) {
     const staged = SELF_INSTALLED_BIN + '.tmp-' + String(process.pid)
     writeFileSync(staged, bytes)
     renameSync(staged, SELF_INSTALLED_BIN)
+    // A downloaded asset carries no mode of its own: without this the copy is not
+    // executable on the Unix-likes and every later spawn fails with EACCES.
+    if (!WINDOWS) chmodSync(SELF_INSTALLED_BIN, 0o755)
     const record = { url: url, checksums: checksumsFrom, sha256: actual, bytes: bytes.length, at: at, target: SELF_INSTALLED_BIN }
     writeFileSync(SETUP_RECORD, JSON.stringify(record, null, 2) + '\n')
     return Object.assign(base, {
@@ -910,7 +932,7 @@ function registerTool(ctx, state) {
         tool: { type: 'string', description: 'For action=which: the tool name, for example node or npm.' },
         flags: { type: 'array', items: { type: 'string' }, description: 'Extra ployenv flags appended verbatim, for example ["--force"] or ["--project"].' },
         raw: { type: 'array', items: { type: 'string' }, description: 'For action=raw: the exact ployenv arguments.' },
-        url: { type: 'string', description: 'For action=setup: download URL; defaults to the newest release alias asset (ployenv-windows-amd64.exe).' },
+        url: { type: 'string', description: 'For action=setup: download URL; defaults to the newest release alias asset for this host (ployenv-<os>-<arch>[.exe]).' },
         sha256: { type: 'string', description: 'For action=setup: expected SHA-256; defaults to the entry in the SHA256SUMS.txt next to the URL.' },
         timeoutMs: { type: 'number', description: 'Optional per-call timeout in milliseconds.' },
       },
