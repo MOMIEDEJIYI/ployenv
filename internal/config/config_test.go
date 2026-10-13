@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,12 +12,57 @@ import (
 	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 )
 
-// resolveInChild re-runs this test binary with a controlled environment and
-// returns what RootInfo decided. A child is required because the choice is made
-// once per process.
+// resolveInChild runs the test binary in its resolve mode with a controlled
+// environment and returns what RootInfo decided. A child is required because the
+// choice is made once per process.
 func resolveInChild(t *testing.T, env map[string]string) (root, source string, writable bool) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0])
+	root, source, writable, _ = runResolveChild(t, env)
+	return root, source, writable
+}
+
+// rootUsableInChild returns the error message the child's RootUsable produced,
+// or "" when the root was usable.
+func rootUsableInChild(t *testing.T, env map[string]string) error {
+	t.Helper()
+	_, _, _, errText := runResolveChild(t, env)
+	if errText == "" || errText == "ok" {
+		return nil
+	}
+	return errors.New(errText)
+}
+
+func runResolveChild(t *testing.T, env map[string]string) (root, source string, writable bool, usable string) {
+	t.Helper()
+	return runChild(t, os.Args[0], env)
+}
+
+// runResolveChildInRoDir copies the test binary into a directory it cannot write
+// to, so the portable "beside the executable" rule is out of reach and only the
+// platform default remains.
+func runResolveChildInRoDir(t *testing.T) (root, source string, writable bool, usable string) {
+	t.Helper()
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "resolve-test"+platform.ExeSuffix())
+	data, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatalf("reading the test binary: %v", err)
+	}
+	if err := os.WriteFile(exe, data, 0o755); err != nil {
+		t.Fatalf("copying the test binary: %v", err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("making the directory read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	return runChild(t, exe, map[string]string{
+		"HOME": "", "XDG_DATA_HOME": "", "USERPROFILE": "", "LOCALAPPDATA": "",
+	})
+}
+
+func runChild(t *testing.T, exe string, env map[string]string) (root, source string, writable bool, usable string) {
+	t.Helper()
+	cmd := exec.Command(exe)
 	childEnv := []string{"PLOYENV_TEST_RESOLVE=1"}
 	for _, kv := range os.Environ() {
 		name := strings.SplitN(kv, "=", 2)[0]
@@ -48,12 +94,14 @@ func resolveInChild(t *testing.T, env map[string]string) (root, source string, w
 			source = value
 		case "writable":
 			writable = value == "true"
+		case "usable":
+			usable = value
 		}
 	}
-	if root == "" || source == "" {
+	if source == "" {
 		t.Fatalf("child reported %q", out)
 	}
-	return root, source, writable
+	return root, source, writable, usable
 }
 
 func TestRootComesFromTheEnvironmentWhenSet(t *testing.T) {
@@ -87,13 +135,17 @@ func TestRootFromEnvironmentIsCleanedAndTrimmed(t *testing.T) {
 
 func TestRootFallsBackToTheExecutableDirectory(t *testing.T) {
 	// The test binary lives in a writable build directory, so the portable
-	// "beside the executable" rule is the one that applies.
-	root, source, writable := resolveInChild(t, map[string]string{"PLOYENV_ROOT": ""})
-
+	// "beside the executable" rule is the one that applies - unless this runner
+	// is root or the binary sits in a system bin directory, in which case the
+	// rule is deliberately off (A5) and there is nothing to assert here.
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
+	if !portableAllowedFor(platform.OS(), filepath.Dir(self), platform.IsRoot()) {
+		t.Skipf("the portable rule does not apply to %s on this runner", filepath.Dir(self))
+	}
+	root, source, writable := resolveInChild(t, map[string]string{"PLOYENV_ROOT": ""})
 	// Compare the directories themselves: Windows may hand out either the long
 	// or the 8.3 short form of the same folder (CI runners do), and EvalSymlinks
 	// can also rewrite the path on macOS.
@@ -505,7 +557,121 @@ func TestDefaultRootPerEnvironment(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("HOME", "")
-	if got := DefaultRoot(); got != ".ployenv" {
-		t.Errorf("without any home, DefaultRoot = %q, want .ployenv", got)
+	if got := DefaultRoot(); got != "" {
+		t.Errorf("without any home, DefaultRoot = %q, want \"\" (FR-809: no relative fallback)", got)
+	}
+}
+
+// FR-809: no environment can make the data directory a *relative* path. With
+// HOME, XDG_DATA_HOME and the Windows equivalents all absent the root is either
+// the portable one beside the executable (writable here) or nothing at all - and
+// never ".ployenv", which is what used to scatter versions into whatever
+// directory ployenv happened to be started from.
+// A5 / REQ-008: the portable rule must not turn a system bin directory into a
+// data directory just because root happens to be able to write there. Every
+// combination is asserted from any runner.
+func TestPortableAllowedFor(t *testing.T) {
+	for _, tc := range []struct {
+		osName, exeDir string
+		isRoot         bool
+		want           bool
+	}{
+		// Windows keeps the behaviour it was built around, root or not.
+		{"windows", `C:\tools`, false, true},
+		{"windows", `C:\tools`, true, true},
+		{"windows", `/usr/local/bin`, true, true},
+		// The Unix-likes: a user directory is fine ...
+		{"linux", "/home/me/.local/bin", false, true},
+		{"darwin", "/Users/me/bin", false, true},
+		{"linux", "/tmp/go-build123/b001", false, true},
+		// ... a system bin directory is not ...
+		{"linux", "/usr/local/bin", false, false},
+		{"linux", "/usr/bin", false, false},
+		{"linux", "/usr/sbin", false, false},
+		{"linux", "/bin", false, false},
+		{"darwin", "/usr/local/bin", false, false},
+		{"darwin", "/opt/homebrew/bin", false, true},
+		// ... and neither is anything at all when running as root.
+		{"linux", "/home/me/bin", true, false},
+		{"darwin", "/Users/me/bin", true, false},
+		// A trailing separator must not sneak past the comparison. (The
+		// exeDir argument is a *host-form* path - it comes from ExeDir() - so
+		// only the host's own spelling is meaningful here; a Windows-shaped
+		// path would be one literal filename on the Unix-likes.)
+		{"linux", "/usr/local/bin/", false, false},
+		{"linux", "/usr/local/bin/../bin", false, false},
+	} {
+		if got := portableAllowedFor(tc.osName, tc.exeDir, tc.isRoot); got != tc.want {
+			t.Errorf("portableAllowedFor(%q, %q, root=%v) = %v, want %v",
+				tc.osName, tc.exeDir, tc.isRoot, got, tc.want)
+		}
+	}
+}
+
+func TestRootNeverFallsBackToARelativePath(t *testing.T) {
+	root, source, _ := resolveInChild(t, map[string]string{
+		"HOME": "", "XDG_DATA_HOME": "", "USERPROFILE": "", "LOCALAPPDATA": "",
+	})
+	if root != "" && !filepath.IsAbs(root) {
+		t.Errorf("root = %q, want an absolute path or none at all", root)
+	}
+	if root != "" && source != string(RootFromExeDir) {
+		t.Errorf("source = %q, want the portable rule when it applies", source)
+	}
+	if root == "" && source != string(RootFromDefault) {
+		t.Errorf("source = %q, want the default-directory label when nothing resolved", source)
+	}
+}
+
+// The rule itself, both directions: an undetermined directory must fail with a
+// message naming the variable that fixes it, and any determined directory must
+// pass - including a relative-looking one, because deciding what is acceptable
+// is the resolver's job, not this check's.
+func TestRootUsableFor(t *testing.T) {
+	if err := rootUsableFor("/var/lib/ployenv"); err != nil {
+		t.Errorf("a resolved root must be usable, got: %v", err)
+	}
+	err := rootUsableFor("")
+	if err == nil {
+		t.Fatal("an empty root must be rejected")
+	}
+	if !errors.Is(err, ErrRootUnavailable) {
+		t.Errorf("the error must be ErrRootUnavailable, got: %v", err)
+	}
+	for _, want := range []string{"PLOYENV_ROOT", "XDG_DATA_HOME", "HOME"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must mention %s, got: %v", want, err)
+		}
+	}
+}
+
+// A resolvable data directory must not report the error. Without PLOYENV_ROOT
+// the child still resolves one - the portable directory beside the executable is
+// writable under `go test` - which is exactly the point: RootUsable only objects
+// when nothing resolved at all.
+func TestRootUsableAcceptsAResolvableRoot(t *testing.T) {
+	if err := rootUsableInChild(t, nil); err != nil {
+		t.Errorf("a pinned PLOYENV_ROOT must be usable, got: %v", err)
+	}
+}
+
+// FR-809, the literal scenario DSH asked for: with HOME and XDG_DATA_HOME gone
+// *and* no writable directory beside the executable, the run must stop with an
+// error naming PLOYENV_ROOT instead of guessing a relative path. The child is
+// copied into a read-only directory so the portable rule cannot apply - on
+// Windows the mode bits do not gate writes, so that half is skipped there and
+// exercised by the ubuntu runner.
+func TestRootUnavailableChildErrors(t *testing.T) {
+	if platform.IsWindows() {
+		t.Skip("directory mode bits do not prevent writes on Windows")
+	}
+	_, _, _, usable := runResolveChildInRoDir(t)
+	if usable == "" || usable == "ok" {
+		t.Fatalf("with no home and an unwritable exe directory the child must report an error, got %q", usable)
+	}
+	for _, want := range []string{"PLOYENV_ROOT", "XDG_DATA_HOME"} {
+		if !strings.Contains(usable, want) {
+			t.Errorf("the child's error must mention %s, got: %s", want, usable)
+		}
 	}
 }

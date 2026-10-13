@@ -54,6 +54,8 @@ func adoptiumArch() string {
 	}
 }
 
+// javaToolPath ignores the platform: every Adoptium build - including the macOS
+// bundle once flattened - keeps java under bin/.
 func javaToolPath(tool, _ string) string {
 	switch tool {
 	case "java", "javac", "jar", "jshell", "keytool":
@@ -61,6 +63,20 @@ func javaToolPath(tool, _ string) string {
 	}
 	return ""
 }
+
+// javaLayoutFor is the OS-parameterised layout rule, in the same spirit as
+// exeFor/toolDirFor: Adoptium's darwin archives are bundles whose real home is
+// nested at Contents/Home, every other platform ships a flat tree. Taking the
+// OS as an argument is what makes both mappings assertable from any runner.
+func javaLayoutFor(osName string) Layout {
+	if osName == "darwin" {
+		return LayoutMacJDK
+	}
+	return LayoutFlatten
+}
+
+// javaLayout is javaLayoutFor for the host platform.
+func javaLayout() Layout { return javaLayoutFor(hostOS()) }
 
 func javaVerify(dir string) (string, error) {
 	out, err := captureOutput(filepath.Join(dir, javaToolPath("java", "")), "-version")
@@ -298,6 +314,6 @@ func javaPlan(ver string) (Plan, error) {
 		File:   name,
 		Bases:  bases,
 		URLFor: func(base string) string { return base },
-		Layout: LayoutFlatten,
+		Layout: javaLayout(),
 	}, nil
 }

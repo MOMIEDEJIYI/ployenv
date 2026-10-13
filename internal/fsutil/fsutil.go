@@ -69,6 +69,27 @@ func CopyFile(src, dst string) error {
 	return out.Close()
 }
 
+// MoveEntries moves every entry of from into to, keeping whatever already
+// exists in to: the first one wins, so a second pass can never clobber a file
+// that is already in place.
+func MoveEntries(from, to string) error {
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		src := filepath.Join(from, e.Name())
+		dst := filepath.Join(to, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // MoveContentsUp flattens a directory that holds a single sub-directory: the
 // archive layout used by Node, Go and the Python standalone builds. It is a
 // no-op when the directory does not have exactly one child directory.
@@ -81,19 +102,8 @@ func MoveContentsUp(dir string) error {
 		return nil
 	}
 	inner := filepath.Join(dir, entries[0].Name())
-	children, err := os.ReadDir(inner)
-	if err != nil {
+	if err := MoveEntries(inner, dir); err != nil {
 		return err
-	}
-	for _, c := range children {
-		from := filepath.Join(inner, c.Name())
-		to := filepath.Join(dir, c.Name())
-		if _, err := os.Stat(to); err == nil {
-			continue
-		}
-		if err := os.Rename(from, to); err != nil {
-			return err
-		}
 	}
 	return os.RemoveAll(inner)
 }

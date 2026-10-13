@@ -16,6 +16,7 @@ import (
 	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
 	"github.com/MOMIEDEJIYI/ployenv/internal/logx"
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
+	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
 	"github.com/MOMIEDEJIYI/ployenv/internal/runtime"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
@@ -99,6 +100,10 @@ func Ensure(spec *runtime.Spec, request string, opts Options) (version string, a
 		return "", false, fmt.Errorf("%s@%s: %s not found after extraction; rolled back (retry with --force)",
 			spec.Name, plan.Exact, spec.Primary)
 	}
+	if err := assertExecutable(spec, dest, plan.Exact); err != nil {
+		_ = os.RemoveAll(dest)
+		return "", false, err
+	}
 	if spec.Verify != nil {
 		if reported, verr := spec.Verify(dest); verr != nil {
 			logx.Warnf("post-install self-check failed (%v), but the files are in place: %s", verr, dest)
@@ -114,6 +119,39 @@ func Ensure(spec *runtime.Spec, request string, opts Options) (version string, a
 		}
 	}
 	return plan.Exact, false, nil
+}
+
+// assertExecutable enforces FR-808. On the Unix-likes a version directory whose
+// primary tool carries no execute bit is unusable, and nothing else notices: the
+// file exists, so HasBinary passes, the install reports success, and the failure
+// only surfaces much later as "permission denied" from the tool itself. An
+// archive that cannot express the mode (a zip built on Windows) drops it
+// silently, so the mode is asserted here rather than trusted.
+func assertExecutable(spec *runtime.Spec, dest, ver string) error {
+	if platform.IsWindows() {
+		return nil
+	}
+	p := spec.BinaryPath(dest, ver)
+	st, err := os.Stat(p)
+	if err != nil {
+		return err
+	}
+	if !executableFor(platform.OS(), st.Mode()) {
+		return fmt.Errorf("%s@%s: %s is not executable (mode %04o) - the archive did not carry its file mode; rolled back (retry with --force)",
+			spec.Name, ver, filepath.Base(p), st.Mode().Perm())
+	}
+	return nil
+}
+
+// executableFor is the OS-parameterised rule behind assertExecutable, in the same
+// spirit as exeFor and javaLayoutFor: an execute bit only means something off
+// Windows, so taking the OS as an argument is what makes both branches assertable
+// from any runner rather than only from the one that runs the check for real.
+func executableFor(osName string, mode os.FileMode) bool {
+	if osName == "windows" {
+		return true
+	}
+	return mode&0o111 != 0
 }
 
 // resolveExact turns a partial request ("22", "lts", "3.12") into one version.

@@ -185,6 +185,32 @@ func TestAdoptiumNamesPerPlatform(t *testing.T) {
 	}
 }
 
+// A1 / REQ-008: Adoptium's darwin archives are bundles (Contents/Home), every
+// other platform ships a flat tree, so the layout rule must select per OS. The
+// pure mapping is asserted for all three so the darwin branch is covered from
+// windows-latest and ubuntu-latest too, and the host accessor is checked to
+// follow the seam.
+func TestJavaLayoutPerPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		osName string
+		want   Layout
+	}{
+		{"darwin", LayoutMacJDK},
+		{"windows", LayoutFlatten},
+		{"linux", LayoutFlatten},
+	} {
+		if got := javaLayoutFor(tc.osName); got != tc.want {
+			t.Errorf("javaLayoutFor(%s) = %v, want %v", tc.osName, got, tc.want)
+		}
+	}
+	for _, osName := range allOSes {
+		withOS(t, osName)
+		if got, want := javaLayout(), javaLayoutFor(osName); got != want {
+			t.Errorf("javaLayout on %s = %v, want %v", osName, got, want)
+		}
+	}
+}
+
 // python's upstream index differs per platform (NuGet on Windows, the
 // python-build-standalone releases elsewhere), so both are asserted.
 func TestPythonOfficialPerPlatform(t *testing.T) {

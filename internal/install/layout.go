@@ -19,11 +19,35 @@ func applyLayout(l runtime.Layout, dest string) error {
 	switch l {
 	case runtime.LayoutFlatten:
 		return fsutil.MoveContentsUp(dest)
+	case runtime.LayoutMacJDK:
+		return flattenMacJDK(dest)
 	case runtime.LayoutNuGet:
 		return flattenNuGet(dest)
 	default:
 		return nil
 	}
+}
+
+// flattenMacJDK normalises Adoptium's macOS archive. macOS JDKs are bundles:
+// the real JDK home (bin/, lib/, ...) sits at <wrapper>/Contents/Home, next to
+// the bundle's own Contents/MacOS and Contents/Info.plist. That second level has
+// siblings, so MoveContentsUp - which only lifts a directory holding exactly one
+// child directory - cannot reach it: without this, the version directory kept a
+// Contents/ where bin/ belongs and every macOS install rolled back with "not
+// found after extraction".
+func flattenMacJDK(dest string) error {
+	if err := fsutil.MoveContentsUp(dest); err != nil {
+		return err
+	}
+	contents := filepath.Join(dest, "Contents")
+	home := filepath.Join(contents, "Home")
+	if !fsutil.DirExists(home) {
+		return nil // a flat archive after all: nothing left to peel
+	}
+	if err := fsutil.MoveEntries(home, dest); err != nil {
+		return err
+	}
+	return os.RemoveAll(contents)
 }
 
 // flattenNuGet moves a NuGet package's tools/ contents up and drops metadata.
