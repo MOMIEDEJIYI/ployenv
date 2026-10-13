@@ -4,7 +4,9 @@
 #   .\build.ps1 -Out bin     -> custom output directory
 #   .\build.ps1 -Package     -> also lay out the GitHub Release assets in dist\release
 #   .\build.ps1 -Version 0.3.2 -Package -> assert that this tree really is 0.3.2
-param([string]$Out = 'dist', [switch]$Test, [switch]$Package, [string]$Version = '')
+#   .\build.ps1 -TargetOS linux -TargetArch arm64 -> cross-build one target (REQ-008)
+param([string]$Out = 'dist', [switch]$Test, [switch]$Package, [string]$Version = '',
+    [string]$TargetOS = '', [string]$TargetArch = '')
 $ErrorActionPreference = 'Stop'
 # Work from the module root: `gofmt ./cmd ./internal`, `go test ./...` and a
 # relative -Out are all resolved against the current directory, so a caller that
@@ -38,14 +40,29 @@ function Invoke-Step([string]$What, [scriptblock]$Body) {
 
 if ($Test) { Invoke-Step 'go test' { go test ./... } }
 Invoke-Step 'go vet' { go vet ./... }
+
+# CGO is pinned off for every build (REQ-008 FR-801): the published binaries are
+# meant to be static, and leaving it to the machine means a build that happens to
+# find a C toolchain links libc and stops being one. Verified byte-identical on
+# the 0.3.3 tree, so Windows is unaffected; it is the cross builds and any box
+# with a different default that this protects.
+$env:CGO_ENABLED = '0'
+if ($TargetOS -eq '') { $TargetOS = (go env GOOS) }
+if ($TargetArch -eq '') { $TargetArch = (go env GOARCH) }
+$env:GOOS = $TargetOS
+$env:GOARCH = $TargetArch
+$exeName = if ($TargetOS -eq 'windows') { 'ployenv.exe' } else { 'ployenv' }
+$built = Join-Path $Out $exeName
+
 # -trimpath matters for the published artifact, not just tidiness: without it the binary
 # embeds the build machine's absolute source paths (both this project's and the Go
 # toolchain's) - 800+ occurrences in the 0.3.2 build were published in the npm package
 # and the GitHub Release asset. Verified 2026-10-12 by the project's public-surface check.
 # Do not drop it.
-Invoke-Step 'go build' { go build -trimpath -ldflags '-s -w' -o "$Out\ployenv.exe" ./cmd/ployenv }
+Invoke-Step 'go build' { go build -trimpath -ldflags '-s -w' -o $built ./cmd/ployenv }
 
-Get-Item "$Out\ployenv.exe" | Select-Object Name, Length
+Write-Host ("target: {0}/{1}  ->  {2}" -f $TargetOS, $TargetArch, $built)
+Get-Item $built | Select-Object Name, Length
 
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
@@ -57,6 +74,12 @@ if ($Package) {
     # here, because a rebuild bakes in the vcs.revision of whatever commit it runs at, which
     # is not the revision inside the committed file - and then the project's ritual
     # "deployed = bundled = built, byte for byte" silently stops holding.
+    #
+    # Option B is a Windows/amd64 arrangement, so packaging only accepts that target;
+    # per-platform assets and SHA256SUMS-<os>-<arch>.txt are REQ-008 batch 4 (FR-802).
+    if ($TargetOS -ne 'windows' -or $TargetArch -ne 'amd64') {
+        throw "-Package only implements the windows/amd64 release point (option B); per-platform assets are REQ-008 FR-802 (batch 4). Got $TargetOS/$TargetArch."
+    }
     $bundledRel = 'dsh-plugin\bin\win32-x64\ployenv.exe'
     $bundled = Join-Path $PSScriptRoot $bundledRel
     if (-not (Test-Path -LiteralPath $bundled)) { throw "bundled binary not found: $bundledRel" }
@@ -88,7 +111,7 @@ if ($Package) {
     # be byte-identical to the bundled file; that is reported, not enforced, because a commit
     # made after a release (docs, README) legitimately differs - the embedded vcs.revision
     # changes even though no code did.
-    $distExe = Join-Path $Out 'ployenv.exe'
+    $distExe = $built
     if (Test-Path -LiteralPath $distExe) {
         $distMeta = (& go version -m $distExe | Out-String)
         $distRevision = if ($distMeta -match 'vcs\.revision=([0-9a-f]+)') { $Matches[1] } else { '(absent)' }
