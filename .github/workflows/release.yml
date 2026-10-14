@@ -32,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "已存在的注释标签，例如 v0.3.2"
+        description: "要发布的注释标签，必须与被派发分支的版本一致（分支是 0.3.3 就填 v0.3.3）；仅补发历史标签才填旧标签"
         required: true
         type: string
       dry_run:
@@ -67,9 +67,30 @@ jobs:
         id: rel
         shell: pwsh
         run: |
+          # Every failing step in this workflow annotates its reason: a failed step's log is not
+          # readable through the API or by a non-admin, so "Process completed with exit code 1" is
+          # all anyone gets otherwise (run #6 cost a full round of guessing for exactly that reason).
+          trap { Write-Host "::error::$($_.Exception.Message)"; exit 1 }
           $tag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.tag }}' } else { '${{ github.ref_name }}' }
           if ($tag -notmatch '^v\d+\.\d+\.\d+') { throw "unexpected release tag: '$tag'" }
           $version = $tag.TrimStart('v')
+
+          # Fail fast and in plain words when the requested tag and the checked-out tree disagree.
+          # The packaging script, the version constant and the bundled binary all have to come from
+          # one tree, so this is not recoverable further down: build.ps1 would only die in the middle
+          # of packaging with "expected version X, but this tree says Y", leaving whoever dispatched
+          # the run with no idea what to do about it (that is exactly what happened on run #6).
+          $srcVersion = (Select-String -LiteralPath 'internal/cli/cli.go' -Pattern 'const Version = "([^"]+)"').Matches[0].Groups[1].Value
+          if ($srcVersion -ne $version) {
+            $hint = if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+              "This workflow packages the tree it checks out, so the tag has to match that tree: dispatch from '$tag' itself, or from a branch whose version is $version."
+            } else {
+              "A tag push checks out the tagged tree, so the tag and its own tree have to agree - this one does not."
+            }
+            throw "version mismatch: the checked-out tree is $srcVersion but the tag is $tag ($version). $hint"
+          }
+          Write-Host "PASS tag-matches-tree  $tag ($version)"
+
           "tag=$tag"         >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "tag=$tag version=$version"
@@ -78,6 +99,7 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: pwsh
         run: |
+          trap { Write-Host "::error::$($_.Exception.Message)"; exit 1 }
           # Backfilling an existing tag: the packaging script comes from the dispatched ref (an old
           # tag predates it, v0.3.2 does), but the BINARY has to come from the tag itself - otherwise
           # the published asset would not be the one that tag shipped.
@@ -88,11 +110,22 @@ jobs:
 
       - name: build gates + lay out the release assets
         shell: pwsh
-        run: ./build.ps1 -Test -Package -Version '${{ steps.rel.outputs.version }}'
+        run: |
+          # Self-diagnosing on purpose. A failed step's log is not readable through the API or by a
+          # non-admin, so the reason has to reach the annotation: without this, the only thing anyone
+          # sees is "Process completed with exit code 1" and the next person has to guess (run #6 cost
+          # a full round of guessing for exactly this reason).
+          trap { Write-Host "::error::release packaging failed: $($_.Exception.Message)"; exit 1 }
+          ./build.ps1 -Test -Package -Version '${{ steps.rel.outputs.version }}'
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::build.ps1 -Test -Package exited $LASTEXITCODE"; exit $LASTEXITCODE }
+          Write-Host 'PASS build.ps1 -Test -Package'
 
       - name: verify the assets (option B)
         shell: pwsh
         run: |
+          # Same reason as the packaging step above: every assertion here is a throw, and a throw
+          # that only reaches the log is invisible to whoever has to act on it.
+          trap { Write-Host "::error::asset verification failed: $($_.Exception.Message)"; exit 1 }
           # NOTE: this block is deliberately ASCII-only. The runner writes a run block to a
           # temporary .ps1 file; if that file is read as ANSI (Windows PowerShell 5.1 does when
           # there is no BOM), a non-ASCII comment can swallow the next line - a trap this project
@@ -175,6 +208,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Publishing is the step where a silent failure hurts most, so its reason is annotated too.
+          trap { Write-Host "::error::publishing the release failed: $($_.Exception.Message)"; exit 1 }
           $tag = '${{ steps.rel.outputs.tag }}'
           $version = '${{ steps.rel.outputs.version }}'
           $dir = 'dist/release'
