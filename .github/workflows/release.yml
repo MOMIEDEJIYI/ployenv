@@ -16,12 +16,15 @@ name: release
 #                     （如 v0.3.2）的树里还没有 `build.ps1 -Package`，但发布的资产
 #                     必须是那个标签当时内置的那份二进制
 #
-# 资产（每个 Release 四件，平铺不打包）：
-#   ployenv-v<ver>-windows-amd64.exe   与仓库内置件逐字节相同（身份锚点）
-#   ployenv-windows-amd64.exe          同一份字节的**固定名别名**，供 releases/latest/download 直取
-#                                      （REQ-003 FR-303 的 `setup` 默认源就吃这个 URL）
+# Assets (each Release, flat, never zipped; REQ-008 FR-802 / 3.1):
+#   ployenv-v<ver>-<goos>-<goarch>[.exe]   six of them. windows/amd64 IS the binary committed in
+#                                          this repository (the identity anchor); the other five
+#                                          are built by CI from the tree of the tag with
+#                                          CGO_ENABLED=0 -trimpath -ldflags '-s -w'
+#   ployenv-<goos>-<goarch>[.exe]          the fixed-name alias of each of those six, for
+#                                          releases/latest/download (REQ-003 FR-303's default source)
 #   LICENSE
-#   SHA256SUMS.txt                     消费者用来校验（覆盖上面三件；FR-303 也吃这个格式）
+#   SHA256SUMS.txt                         one file, listing all thirteen assets (FR-802 v1.4)
 
 on:
   push:
@@ -98,25 +101,54 @@ jobs:
           # checker remains the independent second pair of eyes at handoff time.
           $version = '${{ steps.rel.outputs.version }}'
           $dir = 'dist/release'
-          $stem = "ployenv-v$version-windows-amd64"
           $bundled = 'dsh-plugin/bin/win32-x64/ployenv.exe'
-          $exe = "$dir/$stem.exe"
+          $targets = @('windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64')
 
-          # the asset set must be exactly these four: option B allows one binary, period
-          # (`ployenv-windows-amd64.exe` is that same binary under a version-free name, so that
-          # `releases/latest/download/ployenv-windows-amd64.exe` works for FR-303's default source)
-          $expected = @("$stem.exe", 'ployenv-windows-amd64.exe', 'LICENSE', 'SHA256SUMS.txt')
+          # The asset set must be exactly these: six versioned binaries, the six fixed-name aliases
+          # of the same bytes, LICENSE, and one SHA256SUMS.txt covering all thirteen (FR-802 v1.4).
+          $expected = @()
+          foreach ($t in $targets) {
+            $ext = if ($t -like 'windows-*') { '.exe' } else { '' }
+            $expected += "ployenv-v$version-$t$ext"
+            $expected += "ployenv-$t$ext"
+          }
+          $expected += 'LICENSE'
+          $expected += 'SHA256SUMS.txt'
           $actual = @(Get-ChildItem -LiteralPath $dir -File | Select-Object -ExpandProperty Name)
           if (Compare-Object $expected $actual) { throw "unexpected asset set: $($actual -join ', ')" }
 
-          # the core assertion of option B: the published .exe IS the bundled binary
-          $hExe = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          # windows/amd64 is the one asset that must be byte-identical to the binary committed in
+          # this repository: it is the identity anchor of the release (owner decision, option B).
           $hBundled = (Get-FileHash -LiteralPath $bundled -Algorithm SHA256).Hash
-          if ($hExe -ne $hBundled) { throw "published .exe ($hExe) differs from the bundled binary ($hBundled)" }
+          $hExe = (Get-FileHash -LiteralPath "$dir/ployenv-v$version-windows-amd64.exe" -Algorithm SHA256).Hash
+          if ($hExe -ne $hBundled) { throw "published windows/amd64 ($hExe) differs from the bundled binary ($hBundled)" }
           Write-Host "PASS asset-vs-bundled  $hExe"
-          $hAlias = (Get-FileHash -LiteralPath "$dir/ployenv-windows-amd64.exe" -Algorithm SHA256).Hash
-          if ($hAlias -ne $hBundled) { throw "the version-free alias ($hAlias) differs from the bundled binary" }
-          Write-Host "PASS alias-vs-bundled  $hAlias"
+
+          # Every alias must be the same bytes as its own versioned asset (never a second build).
+          foreach ($t in $targets) {
+            $ext = if ($t -like 'windows-*') { '.exe' } else { '' }
+            $v = (Get-FileHash -LiteralPath "$dir/ployenv-v$version-$t$ext" -Algorithm SHA256).Hash
+            $a = (Get-FileHash -LiteralPath "$dir/ployenv-$t$ext" -Algorithm SHA256).Hash
+            if ($a -ne $v) { throw "the alias of $t differs from its versioned asset" }
+            Write-Host "PASS alias-vs-versioned  $t"
+          }
+
+          # A name has to match its bytes: the first four bytes identify the format, so a mix-up
+          # between targets (a linux build published under a darwin name, say) is caught here. The
+          # sums file cannot catch that - it only proves the bytes did not change after packaging.
+          foreach ($t in $targets) {
+            $ext = if ($t -like 'windows-*') { '.exe' } else { '' }
+            $head = [byte[]]::new(4)
+            $stream = [IO.File]::OpenRead("$dir/ployenv-v$version-$t$ext")
+            try { [void]$stream.Read($head, 0, 4) } finally { $stream.Dispose() }
+            $hex = (($head | ForEach-Object { $_.ToString('X2') }) -join ' ')
+            $ok = $false
+            if ($t -like 'windows-*') { $ok = $hex -like '4D 5A*' }
+            elseif ($t -like 'linux-*') { $ok = $hex -eq '7F 45 4C 46' }
+            elseif ($t -like 'darwin-*') { $ok = @('CF FA ED FE', 'CE FA ED FE', 'FE ED FA CF') -contains $hex }
+            if (-not $ok) { throw "the $t asset is not a $t image (first bytes: $hex)" }
+            Write-Host "PASS asset-kind  $t ($hex)"
+          }
 
           # SHA256SUMS.txt: trust only what the file says, and recompute every line
           $n = 0
@@ -127,10 +159,10 @@ jobs:
             $name = $Matches[2].Trim()
             $got = (Get-FileHash -LiteralPath (Join-Path $dir $name) -Algorithm SHA256).Hash
             if ($got -ne $want) { throw "SHA256SUMS.txt mismatch for $name" }
-            Write-Host "PASS sha256  $name"
             $n++
           }
-          if ($n -ne 3) { throw "SHA256SUMS.txt covers $n files, expected 3" }
+          if ($n -ne 13) { throw "SHA256SUMS.txt covers $n files, expected 13" }
+          Write-Host "PASS sha256sums  13/13 recomputed from disk"
 
           # tag version = code version (build.ps1 -Version checked it once; this checks the tag)
           $srcVersion = (Select-String -LiteralPath 'internal/cli/cli.go' -Pattern 'const Version = "([^"]+)"').Matches[0].Groups[1].Value
@@ -145,9 +177,11 @@ jobs:
         run: |
           $tag = '${{ steps.rel.outputs.tag }}'
           $version = '${{ steps.rel.outputs.version }}'
-          $stem = "ployenv-v$version-windows-amd64"
           $dir = 'dist/release'
-          $assets = @("$dir/$stem.exe", "$dir/ployenv-windows-amd64.exe", "$dir/LICENSE", "$dir/SHA256SUMS.txt")
+          # Whatever the packaging step laid out, minus nothing: six versioned binaries, six
+          # fixed-name aliases, LICENSE and one SHA256SUMS.txt.
+          $assets = @(Get-ChildItem -LiteralPath $dir -File | ForEach-Object { $_.FullName })
+          if ($assets.Count -ne 14) { throw "expected 14 files in ${dir}, found $($assets.Count)" }
           foreach ($a in $assets) { if (-not (Test-Path -LiteralPath $a)) { throw "missing asset: $a" } }
 
           # the annotated tag message is the release note
@@ -190,13 +224,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'gh release view failed' }
 
           # leave evidence in the run summary (with the asset hashes), readable without the logs
-          $exe = "$dir/$stem.exe"
+          $anchor = "$dir/ployenv-v$version-windows-amd64.exe"
           @(
             "## release $tag",
             "",
-            "- binary option: B (the binary committed in this repository; CI never rebuilds it)",
-            "- assets: ``$exe``, ``${dir}/ployenv-windows-amd64.exe`` (version-free alias for `latest/download`), ``${dir}/LICENSE``, ``${dir}/SHA256SUMS.txt``",
-            "- binary SHA-256: ``$((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash)``",
+            "- windows/amd64: option B (the binary committed in this repository; CI never rebuilds it)",
+            "- the other five targets: built by CI from the tree of $tag, CGO_ENABLED=0 -trimpath -ldflags '-s -w'",
+            "- assets: six versioned binaries, their six fixed-name aliases for ``latest/download``, ``LICENSE``, one ``SHA256SUMS.txt``",
+            "- windows/amd64 SHA-256: ``$((Get-FileHash -LiteralPath $anchor -Algorithm SHA256).Hash)``",
             "",
             "### SHA256SUMS.txt",
             "",

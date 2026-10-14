@@ -14,8 +14,11 @@ import (
 const goIndexJSON = `[
   {"version":"go1.27.2","stable":true,"files":[
     {"filename":"go1.27.2.windows-amd64.zip","os":"windows","arch":"amd64","kind":"archive","sha256":"11f27"},
+    {"filename":"go1.27.2.windows-arm64.zip","os":"windows","arch":"arm64","kind":"archive","sha256":"127wa"},
     {"filename":"go1.27.2.linux-amd64.tar.gz","os":"linux","arch":"amd64","kind":"archive","sha256":"11727"},
+    {"filename":"go1.27.2.linux-arm64.tar.gz","os":"linux","arch":"arm64","kind":"archive","sha256":"127la"},
     {"filename":"go1.27.2.darwin-amd64.tar.gz","os":"darwin","arch":"amd64","kind":"archive","sha256":"da12764"},
+    {"filename":"go1.27.2.darwin-amd64.pkg","os":"darwin","arch":"amd64","kind":"installer","sha256":"dd12764"},
     {"filename":"go1.27.2.darwin-arm64.tar.gz","os":"darwin","arch":"arm64","kind":"archive","sha256":"da127a"},
     {"filename":"go1.27.2.darwin-arm64.pkg","os":"darwin","arch":"arm64","kind":"installer","sha256":"dd127"}
   ]},
@@ -129,10 +132,13 @@ func TestGoPlanPicksTheArchiveForThisPlatform(t *testing.T) {
 	// platform's code path, which is how the darwin gap went unnoticed).
 	for _, tc := range []struct{ osName, arch, file string }{
 		{"windows", "amd64", "go1.27.2.windows-amd64.zip"},
+		{"windows", "arm64", "go1.27.2.windows-arm64.zip"},
 		{"linux", "amd64", "go1.27.2.linux-amd64.tar.gz"},
+		{"linux", "arm64", "go1.27.2.linux-arm64.tar.gz"},
 		{"darwin", "amd64", "go1.27.2.darwin-amd64.tar.gz"},
-		// darwin also publishes a .pkg, so the archive is what has to be picked
-		// here: an installer is not something to unpack.
+		// darwin also publishes a .pkg for both of its architectures, so the
+		// archive is what has to be picked here: an installer is not something
+		// to unpack.
 		{"darwin", "arm64", "go1.27.2.darwin-arm64.tar.gz"},
 	} {
 		t.Run(tc.osName+"/"+tc.arch, func(t *testing.T) {
