@@ -16,8 +16,11 @@ name: ci
 #
 # release-pipeline evidence (REQ-008 batch 4), also release points / dispatch / batch branches:
 #   release-assets    -> lays out the six-target asset set and checks it (publishes nothing)
-#   native-smoke      -> builds each published target on a native runner, runs it, and compares
-#                        the bytes with the cross-built asset (NFR-806)
+#   native-smoke      -> builds each published target on a native runner, runs it, runs the whole
+#                        test suite there, and compares the bytes with the cross-built asset
+#   e2e-linux         -> linux/amd64 + linux/arm64 end-to-end (install / activate / inspect /
+#                        uninstall against the public upstream sources)
+#   e2e-windows-arm   -> the windows/arm64 half of NFR-806, same end-to-end in PowerShell
 
 on:
   push:
@@ -413,6 +416,17 @@ jobs:
             Write-Host 'PASS no non-system dylib'
           }
           $LASTEXITCODE = 0
+      - name: the whole test suite, executed on this platform
+        shell: pwsh
+        run: |
+          # Building and running --version only exercises main(); NFR-806 wants the platform's code
+          # paths actually executed, and on darwin/windows the tests that are skipped elsewhere run
+          # here. Same flags as the packaging: CGO off, so the result matches the published binaries.
+          $env:CGO_ENABLED = '0'
+          go test ./... -count=1
+          if ($LASTEXITCODE -ne 0) { throw "go test failed on this platform (exit $LASTEXITCODE)" }
+          Write-Host 'PASS go test ./... on the native runner'
+          $LASTEXITCODE = 0
       - uses: actions/download-artifact@v4
         with:
           name: release-sums
@@ -441,7 +455,7 @@ jobs:
           Write-Host "PASS packaged-equals-native  $name $got (cross build and native build agree byte for byte)"
 
   e2e-linux:
-    name: e2e linux
+    name: e2e linux (${{ matrix.arch }})
     # The end-to-end acceptance is deliberately NOT part of the everyday gate: it
     # downloads a runtime. It runs at a release point, on manual dispatch, or on a
     # batch branch - which is when the evidence is actually wanted.
@@ -455,7 +469,15 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || startsWith(github.ref, 'refs/tags/')
       || startsWith(github.ref, 'refs/heads/develop-v')
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # linux/amd64 and linux/arm64. The script below is already architecture-aware
+        # (`uname -m` picks the node archive), so the arm leg reuses it verbatim.
+        include:
+          - { runner: ubuntu-latest, arch: x64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -518,8 +540,118 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-linux-report
+          name: e2e-linux-report-${{ matrix.arch }}
           path: /tmp/e2e-report.txt
+          if-no-files-found: warn
+
+  e2e-windows-arm:
+    name: e2e windows (arm64)
+    # NFR-806 says every platform we publish an asset for needs one real end-to-end pass in CI, and
+    # cross-compiling plus seam tests do not count. The linux half runs in e2e-linux (both ubuntu
+    # runners); darwin has e2e-macos; this is the windows/arm64 half. Like the others it is written
+    # purely against the product's own CLI and the public upstream sources, so it carries no
+    # internal paths and no internal tooling.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.ref, 'refs/tags/')
+      || startsWith(github.ref, 'refs/heads/develop-v')
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build the binary under test
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          $bin = Join-Path $env:RUNNER_TEMP 'ployenv.exe'
+          go build -trimpath -ldflags '-s -w' -o $bin ./cmd/ployenv
+          if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
+          & $bin --version
+      - name: install, activate, inspect, uninstall (real filesystem, network allowed)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'ployenv.exe'
+          # The job name claims arm64, so the runner has to actually be that.
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') { throw "expected an arm64 runner, got $env:PROCESSOR_ARCHITECTURE" }
+
+          # A throw-away data root: the runner's own environment is never touched.
+          $root = Join-Path $env:RUNNER_TEMP ('ployenv-e2e-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $env:PLOYENV_ROOT = $root
+          $nodeVersion = '20.20.2'
+
+          # -y keeps the first-run setup non-interactive (there is no TTY here).
+          & $bin -y config --set-cache-keep true
+          if ($LASTEXITCODE -ne 0) { throw 'config failed' }
+          & $bin -y install "node@$nodeVersion"
+          if ($LASTEXITCODE -ne 0) { throw 'install failed' }
+
+          # 1) the installed tool must exist and actually run on this machine
+          $nodeExe = Join-Path $root "versions\node\$nodeVersion\node.exe"
+          if (-not (Test-Path -LiteralPath $nodeExe)) { throw "the installed tool is missing: $nodeExe" }
+          $reported = (& $nodeExe --version | Out-String).Trim()
+          Write-Host "installed node reports: $reported"
+          if ($reported -ne "v$nodeVersion") { throw "expected v$nodeVersion, got $reported" }
+          Write-Host 'PASS installed tool exists and runs'
+
+          # 2) the downloaded bytes must match the checksum the upstream publishes
+          $cache = Join-Path $root 'cache'
+          $archive = @(Get-ChildItem -LiteralPath $cache -Recurse -File -Filter '*.zip' | Sort-Object Length -Descending) | Select-Object -First 1
+          if ($null -eq $archive) { throw "no .zip was kept under $cache" }
+          $name = $archive.Name
+          $sums = Join-Path $env:RUNNER_TEMP 'SHASUMS256.txt'
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/v$nodeVersion/SHASUMS256.txt" -OutFile $sums
+          $want = $null
+          foreach ($line in (Get-Content -LiteralPath $sums)) {
+            if ($line -match '^\s*([0-9A-Fa-f]{64})\s+(.+?)\s*$' -and $Matches[2] -eq $name) { $want = $Matches[1].ToLower() }
+          }
+          if ($null -eq $want) { throw "the upstream checksums do not list $name" }
+          $got = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $want) { throw "$name is $want upstream but $got on disk" }
+          Write-Host "PASS archive sha256 = $got (matches upstream)"
+
+          # 3) the rendered session environment must work in this very shell
+          & $bin use "node@$nodeVersion"
+          if ($LASTEXITCODE -ne 0) { throw 'use failed' }
+          Invoke-Expression (& $bin env --shell pwsh | Out-String)
+          $resolved = (Get-Command node -ErrorAction SilentlyContinue).Source
+          if ($null -eq $resolved) { throw 'node is not on PATH after evaluating the session environment' }
+          if (-not $resolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw "node resolves outside the managed root: $resolved" }
+          Write-Host "PASS node resolves inside the managed root"
+          & node --version
+
+          # 4) the reporting commands must agree with what was installed
+          & $bin current node
+          & $bin which node
+          $doc = (& $bin doctor --json | Out-String) | ConvertFrom-Json
+          if ($doc.os -ne 'windows' -or $doc.arch -ne 'arm64') { throw "doctor reports $($doc.os)/$($doc.arch), expected windows/arm64" }
+          Write-Host 'PASS doctor --json reports windows/arm64'
+
+          # 5) and it must clean up after itself
+          & $bin uninstall "node@$nodeVersion"
+          if ($LASTEXITCODE -ne 0) { throw 'uninstall failed' }
+          if (Test-Path -LiteralPath (Join-Path $root "versions\node\$nodeVersion")) { throw 'uninstall left the version directory behind' }
+          Write-Host 'PASS uninstall left no version directory'
+
+          @(
+            "ployenv: $((& $bin --version | Out-String).Trim())",
+            "runner arch: $env:PROCESSOR_ARCHITECTURE",
+            "node: $nodeVersion",
+            "archive: $name",
+            "archive sha256: $got",
+            "upstream sha256: $want"
+          ) | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'e2e-report.txt') -Encoding utf8
+          $LASTEXITCODE = 0
+      - name: keep the run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-windows-arm64-report
+          path: ${{ runner.temp }}/e2e-report.txt
           if-no-files-found: warn
 
   e2e-macos:
