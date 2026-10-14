@@ -12,9 +12,14 @@ name: release
 # 触发：
 #   push v*           正式发布（推标签，整棵树就是标签树）
 #   workflow_dispatch 补发历史标签；dry_run=true 时只校验、不碰 Release
-#                     补发时"打包脚本取派发分支、二进制取标签本身" —— 历史标签
-#                     （如 v0.3.2）的树里还没有 `build.ps1 -Package`，但发布的资产
-#                     必须是那个标签当时内置的那份二进制
+#
+# 补发的**真实**约束（2026-10-14 更正，原注释所述不成立）：打包脚本、版本常量、内置件必须来自**同一棵树**，
+#   `build.ps1` 有两条断言会挡住跨版本补发 —— L159「内置件版本 != 源码版本」与 L123「-Version != 源码版本」。
+#   所以：
+#     ✓ 可补发：标签的版本 == 被派发分支的版本（等价于「从该标签自身派发」，且该标签的树里已有 `-Package`）
+#     ✗ 不可补发：v0.3.2 这类**旧标签** —— 它的树里没有 `build.ps1 -Package`，而派发分支（如 main=0.3.3）
+#       的版本又与之不同，两条断言必然拦下。该情况下请勿再试；需要的话另行决定（例如手工上传资产）。
+#   这正是 2026-10-14 演练 run #6 失败的根因（派发时 tag 填了 v0.3.2 而分支是 0.3.3）。
 #
 # Assets (each Release, flat, never zipped; REQ-008 FR-802 / 3.1):
 #   ployenv-v<ver>-<goos>-<goarch>[.exe]   six of them. windows/amd64 IS the binary committed in
