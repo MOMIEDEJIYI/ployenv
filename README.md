@@ -35,8 +35,9 @@ $ ployenv shell
 
 ## Install
 
-Windows 10/11 is the supported target today; Linux and macOS are layered behind
-`internal/platform` but have not been exercised yet. Building needs **Go 1.22+**.
+Windows 10/11 is the primary target; Linux and macOS (amd64/arm64) are built and
+validated on native runners by CI. The macOS binaries are unsigned and unnotarized,
+so the first run may need `xattr -d com.apple.quarantine`. Building needs **Go 1.22+**.
 
 ```powershell
 go build -ldflags "-s -w" -o dist/ployenv.exe ./cmd/ployenv
@@ -108,6 +109,8 @@ Run `ployenv --help` for the built-in summary.
 - [x] SHA-256 verification for Go archives (node / Java / Python checksums still to come)
 - [x] Session activation without touching the system environment
 - [x] `--json` machine interface
+- [x] Prebuilt archives published to GitHub Releases (windows / linux / darwin on
+      amd64 / arm64, with checksums)
 
 **Next**
 
@@ -120,7 +123,6 @@ Run `ployenv --help` for the built-in summary.
       reserved `kind` field
 - [ ] shell completion scripts; `--dry-run` is rejected until it is implemented (it used to be accepted and silently ignored, BUG-020)
 - [ ] Log rotation honoring `logs.keep`
-- [ ] Prebuilt archives attached to GitHub releases
 
 **Not planned**
 
