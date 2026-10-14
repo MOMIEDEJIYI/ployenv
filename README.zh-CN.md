@@ -27,8 +27,9 @@ $ ployenv shell
 
 ## 安装
 
-当前以 **Windows 10/11** 为主要支持目标；Linux / macOS 已在 `internal/platform` 分层
-但尚未实际验证。从源码构建需要 **Go 1.22+**。
+当前以 **Windows 10/11** 为主要支持目标；Linux 与 macOS（amd64/arm64）由 CI 在真机上构建并
+验证。macOS 二进制未签名、未公证，首次运行可能被 Gatekeeper 拦下，需用
+`xattr -d com.apple.quarantine` 放行。从源码构建需要 **Go 1.22+**。
 
 ```powershell
 go build -ldflags "-s -w" -o dist/ployenv.exe ./cmd/ployenv
@@ -99,6 +100,7 @@ python=3.12
 - [x] Go 安装包的 SHA-256 校验（node / Java / Python 的校验和待补）
 - [x] 会话级激活，不改系统环境
 - [x] `--json` 机器接口
+- [x] 预编译包随 GitHub Releases 发布（windows / linux / darwin × amd64 / arm64，附校验和）
 
 **计划中**
 
@@ -107,7 +109,6 @@ python=3.12
 - [ ] 用同一套 `Spec` 定义接入更多运行时，含已预留 `kind` 字段的数据库 / 中间件（`MySQL`、`Redis`、`Nginx`）
 - [ ] shell 补全脚本；`install --dry-run` 在实现前会被**拒绝**（此前是接受并忽略，会真下载安装，BUG-020）
 - [ ] 按 `logs.keep` 做日志轮转
-- [ ] 在 GitHub Releases 提供预编译包
 
 **明确不做**
 
