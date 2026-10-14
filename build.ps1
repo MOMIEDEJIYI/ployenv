@@ -153,7 +153,13 @@ if ($Package) {
             Write-Host ''
             Write-Host '== release packaging (option B: windows/amd64 ships the bundled binary, never rebuilds it) =='
             Write-Host ("PASS bundled-exists      {0} ({1} bytes)" -f $bundledRel, (Get-Item -LiteralPath $bundled).Length)
-            Write-Host ("PASS bundled-version     {0}   (internal/cli/cli.go: {1})" -f $binVersion, $srcVersion)
+            # Do NOT spell out the file extension here. A problem matcher on the runner reads
+            # "<something>.go: <message>" as a compiler diagnostic, so a line like
+            # "PASS bundled-version  0.3.3   (internal/cli/cli.go: 0.3.3)" is published as a
+            # failure-level annotation whose message is just "0.3.3)" - a green run that looks red.
+            # Measured 2026-10-14: the annotation is attributed a path and a line number, i.e. it
+            # comes from a matcher, not from anything this script prints (I-26).
+            Write-Host ("PASS bundled-version     {0}   (version constant in internal/cli: {1})" -f $binVersion, $srcVersion)
             Write-Host ("PASS bundled-clean-tree  vcs.revision={0}, vcs.modified=false" -f $binRevision)
 
             if ($binVersion -ne $srcVersion) { throw "version mismatch: bundled binary is $binVersion, internal/cli/cli.go is $srcVersion" }
