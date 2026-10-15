@@ -259,9 +259,14 @@ func TestLoadFillsInDefaults(t *testing.T) {
 
 func TestLoadSurvivesABrokenConfigFile(t *testing.T) {
 	resetRoot(t)
+	resetConfigWarning()
 	writeConfigFile(t, "{ this is not json")
 
-	cfg := Load()
+	// Ignoring the file is deliberate; saying so is part of the contract, and it
+	// is reported once per process because Load runs on many paths (I-30). The
+	// file itself is never overwritten - see TestSaveRefusesToOverwriteAnUnusableConfig.
+	var cfg *Config
+	captureStderr(t, func() { cfg = Load() })
 	if cfg == nil {
 		t.Fatal("a broken config file must not take ployenv down")
 	}
