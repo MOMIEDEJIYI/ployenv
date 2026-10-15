@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -260,25 +261,59 @@ func LogsDir() string {
 func StateDir() string { return filepath.Join(RootDir(), "state") }
 
 // Load reads config.json, filling in defaults for missing fields.
+//
+// A file that exists but cannot be read or parsed is reported once per process
+// and then ignored, so the command still runs: a broken config.json must not
+// take ployenv down. Save refuses to overwrite such a file, which is what keeps
+// this fallback from destroying the user's content (I-30).
 func Load() *Config {
 	cfg := &Config{Defaults: map[string]string{}, Mirrors: map[string]string{}}
-	if data, err := fsutil.ReadTextFile(ConfigPath()); err == nil {
-		if json.Unmarshal(data, cfg) == nil {
-			if cfg.Defaults == nil {
-				cfg.Defaults = map[string]string{}
-			}
-			if cfg.Mirrors == nil {
-				cfg.Mirrors = map[string]string{}
-			}
-			if cfg.Root == "" {
-				cfg.Root = RootDir()
-			}
-			return cfg
+	path := ConfigPath()
+	data, err := fsutil.ReadTextFile(path)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, cfg); err != nil {
+			warnConfigOnce("%s is not a usable ployenv config (%v); continuing with an empty configuration (writes are refused until it is fixed)", path, err)
+			break
 		}
+		if cfg.Defaults == nil {
+			cfg.Defaults = map[string]string{}
+		}
+		if cfg.Mirrors == nil {
+			cfg.Mirrors = map[string]string{}
+		}
+		if cfg.Root == "" {
+			cfg.Root = RootDir()
+		}
+		return cfg
+	case os.IsNotExist(err):
+		// First run: the file appears on the next Save. Nothing to report.
+	default:
+		warnConfigOnce("cannot read %s (%v); continuing with an empty configuration", path, err)
 	}
 	cfg.Root = RootDir()
 	return cfg
 }
+
+// warnConfigOnce writes one diagnostic line to stderr, at most once per process.
+//
+// Load runs on nearly every code path, so a broken file would otherwise repeat
+// the same line several times per command. The state is a plain flag rather than
+// a sync.Once because a test has to be able to observe the first warning again.
+func warnConfigOnce(format string, args ...any) {
+	configWarnMu.Lock()
+	defer configWarnMu.Unlock()
+	if configWarned {
+		return
+	}
+	configWarned = true
+	fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
+}
+
+var (
+	configWarnMu sync.Mutex
+	configWarned bool
+)
 
 // Save writes config.json, keeping an installed folder movable by leaving root
 // empty when the data lives beside the binary.
@@ -288,6 +323,10 @@ func Save(cfg *Config) error {
 		root = RootDir()
 	}
 	if err := os.MkdirAll(root, platform.DirPerm()); err != nil {
+		return err
+	}
+	path := filepath.Join(root, "config.json")
+	if err := refuseUnusableConfig(path); err != nil {
 		return err
 	}
 	stored := *cfg
@@ -305,7 +344,29 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, "config.json"), append(data, '\n'), platform.FilePerm())
+	return os.WriteFile(path, append(data, '\n'), platform.FilePerm())
+}
+
+// refuseUnusableConfig returns an error when config.json exists but cannot be
+// confirmed to be a valid configuration (I-30).
+//
+// Load has to fall back to an empty config when the file will not parse, so
+// without this guard the next Save - any `ployenv use`, for instance - would
+// overwrite a file the user could still repair. Refusing is the only option that
+// cannot lose data, and the message says what to do about it.
+func refuseUnusableConfig(path string) error {
+	data, err := fsutil.ReadTextFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // first run: there is nothing to lose
+		}
+		return fmt.Errorf("cannot read %s (%v); refusing to overwrite it - nothing was written", path, err)
+	}
+	var probe Config
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return fmt.Errorf("%s is not a usable ployenv config (%v); refusing to overwrite it - fix or move the file, nothing was written", path, err)
+	}
+	return nil
 }
 
 // EnsureRoot creates the directory layout ployenv needs.
