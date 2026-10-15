@@ -128,18 +128,44 @@ func cmdUse(rest []string, g globals) error {
 	return nil
 }
 
+// activationHintLines returns the recipes that activate a session on osName.
+//
+// It is a pure function of the OS name so both branches stay testable on every
+// platform (I-27): the PowerShell recipe used to omit --shell pwsh, but `ployenv
+// env` without --shell prints the POSIX form on every platform, so the recipe as
+// printed could not be pasted into the shell it named.
+func activationHintLines(osName string) []string {
+	if osName == "windows" {
+		return []string{
+			"  cmd          ployenv shell",
+			"  PowerShell   ployenv env --shell pwsh | Invoke-Expression",
+		}
+	}
+	return []string{
+		"  bash / zsh   eval \"$(ployenv env --shell bash)\"",
+		"  any shell    ployenv shell",
+	}
+}
+
+// envShellHint warns when `env` printed the POSIX form on a platform whose
+// default shells cannot run it (I-27). It stays empty when the caller named a
+// shell or the host is not Windows, and the caller writes it to stderr so that
+// `eval "$(ployenv env)"` still captures stdout only.
+func envShellHint(shell, osName string) string {
+	if strings.TrimSpace(shell) != "" || osName != "windows" {
+		return ""
+	}
+	return "hint: this is the POSIX form; pass --shell cmd (cmd.exe) or --shell pwsh (PowerShell) for this terminal"
+}
+
 // printActivateHint explains that recording a version does not put the tools on
 // the current terminal's PATH; the session must be activated first. The recipes
 // are the ones the current platform can run (REQ-008 A7).
 func printActivateHint() {
 	fmt.Println("note: this only records the version; it does not change PATH in the current terminal.")
-	if platform.IsWindows() {
-		fmt.Println("  cmd          ployenv shell")
-		fmt.Println("  PowerShell   ployenv env | Invoke-Expression")
-		return
+	for _, line := range activationHintLines(platform.OS()) {
+		fmt.Println(line)
 	}
-	fmt.Println("  bash / zsh   eval \"$(ployenv env --shell bash)\"")
-	fmt.Println("  any shell    ployenv shell")
 }
 
 // writeProjectFile sets key=value in the current directory's .ployenv,
@@ -217,6 +243,9 @@ func cmdEnv(rest []string, g globals) error {
 	if g.json || strings.EqualFold(shell, "json") {
 		return printJSON(entry.JSONValue())
 	}
+	if hint := envShellHint(shell, platform.OS()); hint != "" {
+		fmt.Fprintln(os.Stderr, hint)
+	}
 	out, err := entry.Script(shell)
 	if err != nil {
 		return err
@@ -247,6 +276,18 @@ func cmdShell(rest []string, g globals) error {
 	return envx.Shell(value(flags, "shell"), entry, title)
 }
 
+// isClearWord reports whether a value means "no version / no mirror" rather
+// than a literal. --set-mirror already accepted these words; --set-default now
+// shares the rule so the two stay symmetric (I-29). No managed runtime has a
+// version or mirror literally spelled this way.
+func isClearWord(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "none", "off", "default":
+		return true
+	}
+	return false
+}
+
 func cmdConfig(rest []string, g globals) error {
 	pos, flags := splitFlags(rest)
 	cfg := config.Load()
@@ -270,7 +311,7 @@ func cmdConfig(rest []string, g globals) error {
 		if cfg.Mirrors == nil {
 			cfg.Mirrors = map[string]string{}
 		}
-		if url == "none" || url == "off" || url == "default" {
+		if isClearWord(url) {
 			delete(cfg.Mirrors, spec.Name)
 		} else {
 			cfg.Mirrors[spec.Name] = strings.TrimRight(url, "/")
@@ -285,7 +326,7 @@ func cmdConfig(rest []string, g globals) error {
 	if has(flags, "set-default") {
 		lang := value(flags, "set-default")
 		if lang == "" {
-			return fmt.Errorf("usage: ployenv config --set-default <lang> <version>")
+			return fmt.Errorf("usage: ployenv config --set-default <lang> <version|none>")
 		}
 		spec, err := specOrFail(lang)
 		if err != nil {
@@ -296,7 +337,23 @@ func cmdConfig(rest []string, g globals) error {
 			ver = pos[0]
 		}
 		if ver == "" {
-			return fmt.Errorf("usage: ployenv config --set-default <lang> <version>")
+			return fmt.Errorf("usage: ployenv config --set-default <lang> <version|none>")
+		}
+		// A clear word means "no version", exactly like --set-mirror: without
+		// this, `--set-default java none` stored the literal version "none" and
+		// every later resolution failed with "requires java@none" (I-29).
+		if isClearWord(ver) {
+			was := cfg.Defaults[spec.Name]
+			delete(cfg.Defaults, spec.Name)
+			if err := config.Save(cfg); err != nil {
+				return err
+			}
+			if strings.TrimSpace(was) == "" {
+				fmt.Printf("Default version already unset: %s\n", spec.Name)
+			} else {
+				fmt.Printf("Default version cleared: %s (was %s)\n", spec.Name, was)
+			}
+			return nil
 		}
 		cfg.Defaults[spec.Name] = ver
 		if err := config.Save(cfg); err != nil {
