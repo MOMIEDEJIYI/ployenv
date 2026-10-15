@@ -570,3 +570,68 @@ func TestMirrorLabelAndLogsEffective(t *testing.T) {
 		t.Errorf("logsEffective = %q %q %d", mode, dir, keep)
 	}
 }
+
+func TestActivationHintNamesTheShellFlagEachPlatformCanRun(t *testing.T) {
+	// I-27: `ployenv env` prints the POSIX form unless --shell says otherwise, so
+	// the PowerShell recipe has to name --shell pwsh or it cannot be pasted.
+	win := strings.Join(activationHintLines("windows"), "\n")
+	if !strings.Contains(win, "ployenv env --shell pwsh | Invoke-Expression") {
+		t.Errorf("the PowerShell recipe must name --shell pwsh:\n%s", win)
+	}
+	if strings.Contains(win, "ployenv env | Invoke-Expression") {
+		t.Errorf("the PowerShell recipe must not call `env` without --shell:\n%s", win)
+	}
+	if !strings.Contains(win, "ployenv shell") {
+		t.Errorf("the cmd recipe must survive:\n%s", win)
+	}
+	posix := strings.Join(activationHintLines("linux"), "\n")
+	if !strings.Contains(posix, `eval "$(ployenv env --shell bash)"`) || !strings.Contains(posix, "ployenv shell") {
+		t.Errorf("the POSIX recipes changed:\n%s", posix)
+	}
+}
+
+func TestEnvShellHintOnlyOnWindowsWithoutAnExplicitShell(t *testing.T) {
+	// On Windows the default `env` output cannot run in cmd or PowerShell, so the
+	// command warns on stderr; naming a shell (or not being on Windows) is silent.
+	got := envShellHint("", "windows")
+	if !strings.Contains(got, "--shell cmd") || !strings.Contains(got, "--shell pwsh") {
+		t.Errorf("a Windows `env` without --shell must point at both flags, got %q", got)
+	}
+	for _, tc := range []struct{ shell, osName string }{
+		{"bash", "windows"}, {"pwsh", "windows"}, {"json", "windows"},
+		{"", "linux"}, {"", "darwin"},
+	} {
+		if got := envShellHint(tc.shell, tc.osName); got != "" {
+			t.Errorf("envShellHint(%q, %q) = %q, want empty", tc.shell, tc.osName, got)
+		}
+	}
+}
+
+func TestSetDefaultClearWordUnsetsTheVersion(t *testing.T) {
+	// I-29: the clear words delete the entry instead of storing a literal version
+	// nobody has (that used to fail later with "requires node@none").
+	resetSandbox(t)
+	makeVersion(t, "node", "21.0.0")
+	for _, word := range []string{"none", "off", "default"} {
+		if out := mustRunCLI(t, "config", "--set-default", "node", "21.0.0"); !strings.Contains(out, "Default version updated") {
+			t.Fatalf("set-default printed:\n%s", out)
+		}
+		if got := readConfig(t).Defaults["node"]; got != "21.0.0" {
+			t.Fatalf("the default was not recorded, got %q", got)
+		}
+		out := mustRunCLI(t, "config", "--set-default", "node", word)
+		if !strings.Contains(out, "cleared") {
+			t.Errorf("set-default %s printed:\n%s", word, out)
+		}
+		if got := readConfig(t).Defaults["node"]; got != "" {
+			t.Errorf("set-default %s left %q in the defaults", word, got)
+		}
+	}
+	// Clearing twice is not an error, and the summary says the runtime is unset.
+	if out := mustRunCLI(t, "config", "--set-default", "node", "none"); !strings.Contains(out, "already unset") {
+		t.Errorf("clearing an unset default printed:\n%s", out)
+	}
+	if out := mustRunCLI(t, "config"); !strings.Contains(out, "(not set)") {
+		t.Errorf("the summary must report an unset runtime:\n%s", out)
+	}
+}

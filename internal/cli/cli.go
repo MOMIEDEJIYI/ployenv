@@ -72,7 +72,7 @@ session activation (never modifies the system environment):
 configuration:
   ployenv config                                show every setting
   ployenv config --set-mirror <lang> <url>      set a mirror (none restores the official source)
-  ployenv config --set-default <lang> <ver>     set the global default version
+  ployenv config --set-default <lang> <ver>     set the global default version (none clears it)
   ployenv config --set-log-mode <mode>          log mode (off|on-error|always)
   ployenv config --set-cache-keep <true|false>  keep downloaded archives after install
   ployenv cache [--clean]                       show / empty the download cache
