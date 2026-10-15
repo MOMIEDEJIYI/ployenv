@@ -190,12 +190,17 @@ change: config --set-default | --set-mirror | --set-log-mode | --set-cache-keep
 
 | 参数 | 作用 |
 |---|---|
-| `--set-default <语言> <版本>` | 设置全局默认版本。 |
+| `--set-default <语言> <版本>` | 设置全局默认版本。写 `none`、`off` 或 `default` 取消该默认值。 |
 | `--set-mirror <语言> <地址>` | 为该运行时设置镜像。写 `none`、`off` 或 `default` 恢复官方源。 |
 | `--set-log-mode off\|on-error\|always` | 诊断日志何时写入 `logs/`：从不、仅失败时、始终。 |
 | `--set-cache-keep true\|false` | 安装成功后是否保留下载的安装包。 |
 
 `config.json` 就是普通 JSON，可以手动编辑。
+
+```powershell
+ployenv config --set-default node 22.23.3    # 设置全局默认版本
+ployenv config --set-default node none       # 取消它（也可写 off / default）
+```
 
 ## 镜像
 

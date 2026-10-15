@@ -204,12 +204,17 @@ change: config --set-default | --set-mirror | --set-log-mode | --set-cache-keep
 
 | Flag | Effect |
 |---|---|
-| `--set-default <lang> <version>` | Set the global default version. |
+| `--set-default <lang> <version>` | Set the global default version. `none`, `off` or `default` clears it. |
 | `--set-mirror <lang> <url>` | Use a mirror for a runtime. `none`, `off` or `default` restores the official source. |
 | `--set-log-mode off\|on-error\|always` | When diagnostics are written to `logs/`: never, only on failure, or always. |
 | `--set-cache-keep true\|false` | Keep downloaded archives after a successful install. |
 
 `config.json` is plain JSON and can be edited by hand.
+
+```powershell
+ployenv config --set-default node 22.23.3    # set the global default
+ployenv config --set-default node none       # clear it again (also: off / default)
+```
 
 ## Mirrors
 
