@@ -108,7 +108,12 @@ Installation steps:
 | Command | Description |
 |---|---|
 | `ployenv use <lang>@<version>` | Write the version into `config.json` as the global default. |
-| `ployenv use <lang>@<version> --project` | Write it into `.ployenv` in the current directory. |
+| `ployenv use <lang>@<version> -p` | Write it into `.ployenv` in the current directory (`--project` is the long form). |
+| `ployenv use <lang>@none [-p]` | Remove that default / that `.ployenv` entry. `off` and `default` mean the same. |
+
+`-p`/`--project` selects the project file, `-g`/`--global` states the global default
+explicitly. A flag the command does not accept is refused rather than ignored, so
+`--project` can no longer change the global default by accident.
 
 `use` only records a version. To make it take effect in a terminal, activate it
 (see below).
@@ -209,7 +214,7 @@ change: config --set-default | --set-mirror | --set-log-mode | --set-cache-keep
 | `--set-log-mode off\|on-error\|always` | When diagnostics are written to `logs/`: never, only on failure, or always. |
 | `--set-cache-keep true\|false` | Keep downloaded archives after a successful install. |
 
-`config.json` is plain JSON and can be edited by hand.
+`config.json` is plain JSON and can be edited by hand. Reading tolerates a UTF-8 BOM (Windows editors add one) and writing back normalises to UTF-8 without a BOM; a file that cannot be parsed is reported once and never overwritten.
 
 ```powershell
 ployenv config --set-default node 22.23.3    # set the global default
