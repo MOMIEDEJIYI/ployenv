@@ -8,6 +8,7 @@ import (
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
 	"github.com/MOMIEDEJIYI/ployenv/internal/envx"
+	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
 	"github.com/MOMIEDEJIYI/ployenv/internal/install"
 	"github.com/MOMIEDEJIYI/ployenv/internal/logx"
 	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
@@ -169,12 +170,16 @@ func printActivateHint() {
 }
 
 // writeProjectFile sets key=value in the current directory's .ployenv,
-// preserving any other lines.
+// preserving any other lines. Reading through fsutil.ReadTextFile matters here
+// as much as in the parsers: a BOM in front of the first line would hide an
+// existing key from the comparison below, so the new value would be appended
+// instead of replacing it - and a duplicate key is worse than the original bug,
+// because the first occurrence wins when the file is read back (I-28).
 func writeProjectFile(key, val string) (string, error) {
 	path := ".ployenv"
 	lines := []string{}
 	replaced := false
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := fsutil.ReadTextFile(path); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {

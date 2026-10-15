@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
+	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
 	"github.com/MOMIEDEJIYI/ployenv/internal/runtime"
 	"github.com/MOMIEDEJIYI/ployenv/internal/version"
 )
@@ -144,20 +145,20 @@ func findProjectFrom(start string, spec *runtime.Spec) (value, source string) {
 	dir := start
 	for depth := 0; depth < 32; depth++ {
 		p := filepath.Join(dir, projectFileName)
-		if data, err := os.ReadFile(p); err == nil {
+		if data, err := fsutil.ReadTextFile(p); err == nil {
 			if v := parseKeyValue(string(data), spec); v != "" {
 				return v, p
 			}
 		}
 		tf := filepath.Join(dir, ".tool-versions")
-		if data, err := os.ReadFile(tf); err == nil {
+		if data, err := fsutil.ReadTextFile(tf); err == nil {
 			if v := parseToolVersions(string(data), spec); v != "" {
 				return v, tf
 			}
 		}
 		for _, name := range compatFiles(spec.Name) {
 			p := filepath.Join(dir, name)
-			if data, err := os.ReadFile(p); err == nil {
+			if data, err := fsutil.ReadTextFile(p); err == nil {
 				if v := firstVersionToken(string(data)); v != "" {
 					return v, p
 				}
@@ -199,7 +200,7 @@ var (
 
 func goModVersion(dir string) (string, string) {
 	p := filepath.Join(dir, "go.mod")
-	data, err := os.ReadFile(p)
+	data, err := fsutil.ReadTextFile(p)
 	if err != nil {
 		return "", ""
 	}

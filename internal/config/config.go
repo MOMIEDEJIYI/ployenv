@@ -262,7 +262,7 @@ func StateDir() string { return filepath.Join(RootDir(), "state") }
 // Load reads config.json, filling in defaults for missing fields.
 func Load() *Config {
 	cfg := &Config{Defaults: map[string]string{}, Mirrors: map[string]string{}}
-	if data, err := os.ReadFile(ConfigPath()); err == nil {
+	if data, err := fsutil.ReadTextFile(ConfigPath()); err == nil {
 		if json.Unmarshal(data, cfg) == nil {
 			if cfg.Defaults == nil {
 				cfg.Defaults = map[string]string{}

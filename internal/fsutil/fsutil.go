@@ -34,6 +34,25 @@ func SamePath(a, b string) bool {
 	return a == b
 }
 
+// ReadTextFile is os.ReadFile with a leading UTF-8 byte-order mark removed.
+//
+// Editors on Windows (Notepad, PowerShell's `Set-Content -Encoding UTF8`) put a
+// BOM in front of text files. Go's strings.TrimSpace does not treat U+FEFF as
+// space - it is Cf, not White_Space - so the first line's key reads as
+// "\ufeffkey" and is silently skipped, and json.Unmarshal rejects the file
+// outright. Everything ployenv parses therefore reads through here rather than
+// os.ReadFile. Only a leading BOM is dropped; bytes elsewhere are untouched.
+func ReadTextFile(p string) ([]byte, error) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		return data[3:], nil
+	}
+	return data, nil
+}
+
 // HumanBytes formats a byte count as "1.5 MB" style text.
 func HumanBytes(n int64) string {
 	const unit = 1024
