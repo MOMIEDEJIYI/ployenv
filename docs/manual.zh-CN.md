@@ -100,7 +100,11 @@ ployenv 从不做系统级安装，也从不改写不属于自己的文件。
 | 命令 | 说明 |
 |---|---|
 | `ployenv use <语言>@<版本>` | 写入 `config.json`，作为全局默认版本。 |
-| `ployenv use <语言>@<版本> --project` | 写入当前目录的 `.ployenv`。 |
+| `ployenv use <语言>@<版本> -p` | 写入当前目录的 `.ployenv`（`-p` 是 `--project` 的短写法）。 |
+| `ployenv use <语言>@none [-p]` | 取消该默认值 / 删除 `.ployenv` 里那一条；`off`、`default` 同义。 |
+
+`-p`/`--project` 选当前目录的项目文件，`-g`/`--global` 显式声明全局默认。命令不接受的
+flag 会被**拒绝**而不是忽略 —— 因此 `--project` 再也不会被用错命令时悄悄改掉全局默认值。
 
 `use` 只是记录版本。要让它在某个终端里生效，需要激活该会话（见下）。
 
@@ -195,7 +199,7 @@ change: config --set-default | --set-mirror | --set-log-mode | --set-cache-keep
 | `--set-log-mode off\|on-error\|always` | 诊断日志何时写入 `logs/`：从不、仅失败时、始终。 |
 | `--set-cache-keep true\|false` | 安装成功后是否保留下载的安装包。 |
 
-`config.json` 就是普通 JSON，可以手动编辑。
+`config.json` 就是普通 JSON，可以手动编辑。读取时容忍 UTF-8 BOM（Windows 编辑器常加），写回时规整为不带 BOM 的 UTF-8；无法解析的文件会**告警一次且不会被覆盖**。
 
 ```powershell
 ployenv config --set-default node 22.23.3    # 设置全局默认版本

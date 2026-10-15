@@ -85,10 +85,26 @@ func cmdUninstall(rest []string, g globals) error {
 	return nil
 }
 
+// useScope reports the scope the caller asked for and rejects a contradiction.
+// The two scopes are the project file in the current directory and the one
+// global default; `-p`/`--project` picks the former, `-g`/`--global` states the
+// latter explicitly (I-31/I-32).
+func useScope(flags map[string]string) (bool, error) {
+	project, global := has(flags, "project"), has(flags, "global")
+	if project && global {
+		return false, fmt.Errorf("--project and --global are mutually exclusive: pick the scope you mean")
+	}
+	return project, nil
+}
+
 func cmdUse(rest []string, g globals) error {
 	pos, flags := splitFlags(rest)
 	if len(pos) == 0 {
-		return fmt.Errorf("usage: ployenv use <lang>@<version> [--project]")
+		return fmt.Errorf("usage: ployenv use <lang>@<version> [-p|--project] (or <lang>@none to clear it)")
+	}
+	project, err := useScope(flags)
+	if err != nil {
+		return err
 	}
 	lang, ver := splitAt(pos[0])
 	spec, err := specOrFail(lang)
@@ -99,7 +115,16 @@ func cmdUse(rest []string, g globals) error {
 		ver = pos[1]
 	}
 	if ver == "" {
-		return fmt.Errorf("specify a version, e.g. ployenv use %s@lts", spec.Name)
+		return fmt.Errorf("specify a version, e.g. ployenv use %s@lts (or %s@none to clear it)", spec.Name, spec.Name)
+	}
+	// A clear word removes the entry instead of naming a version nobody has:
+	// `use <lang>@none [-p]` is the only way to drop a project entry (I-32), and
+	// it mirrors `config --set-default <lang> none` for the global default (I-29).
+	if isClearWord(ver) {
+		if project {
+			return clearProjectEntry(spec.Name)
+		}
+		return clearGlobalDefault(spec.Name)
 	}
 	// Share the resolution rule, so "latest" means the same thing in `use` as
 	// it does in `current` (BUG-004).
@@ -110,7 +135,7 @@ func cmdUse(rest []string, g globals) error {
 		}
 		return fmt.Errorf("%s@%s is not installed; run ployenv install %s@%s first", spec.Name, ver, spec.Name, ver)
 	}
-	if has(flags, "project") {
+	if project {
 		path, err := writeProjectFile(spec.Name, match)
 		if err != nil {
 			return err
@@ -127,6 +152,89 @@ func cmdUse(rest []string, g globals) error {
 	fmt.Printf("Global default set: %s = %s\n", spec.Name, match)
 	printActivateHint()
 	return nil
+}
+
+// clearGlobalDefault removes the global default of one runtime. The low-level
+// equivalent is `ployenv config --set-default <lang> none` (I-29).
+func clearGlobalDefault(lang string) error {
+	cfg := config.Load()
+	was := cfg.Defaults[lang]
+	delete(cfg.Defaults, lang)
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	if strings.TrimSpace(was) == "" {
+		fmt.Printf("Global default already unset: %s\n", lang)
+		return nil
+	}
+	fmt.Printf("Global default cleared: %s (was %s)\n", lang, was)
+	return nil
+}
+
+// clearProjectEntry removes one runtime from the current directory's .ployenv,
+// keeping every other line. A file with nothing left is deleted rather than left
+// behind as an empty stub; a file with comments or other entries is rewritten
+// without the key. It is the counterpart of `use <lang>@<version> -p` (I-32).
+func clearProjectEntry(lang string) error {
+	path := ".ployenv"
+	data, err := fsutil.ReadTextFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("No project file here: nothing to clear for %s\n", lang)
+			return nil
+		}
+		return err
+	}
+	kept := []string{}
+	removed := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.EqualFold(entryKey(line), lang) {
+			removed = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	abs, _ := filepath.Abs(path)
+	if !removed {
+		fmt.Printf("Project file %s has no %s entry: nothing to clear\n", abs, lang)
+		return nil
+	}
+	blank := true
+	for _, line := range kept {
+		if strings.TrimSpace(line) != "" {
+			blank = false
+			break
+		}
+	}
+	if blank {
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+		fmt.Printf("Project file removed: %s (no entries left)\n", abs)
+		return nil
+	}
+	body := strings.TrimRight(strings.Join(kept, "\n"), "\n") + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("Updated project file: %s (%s removed)\n", abs, lang)
+	return nil
+}
+
+// entryKey reads the key of one project-file line ("node=22", "node: 22",
+// "node 22"); blank and comment-only lines have none.
+func entryKey(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "//") {
+		return ""
+	}
+	if i := strings.IndexAny(trimmed, "=:"); i > 0 {
+		return strings.TrimSpace(trimmed[:i])
+	}
+	if fields := strings.Fields(trimmed); len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
 }
 
 // activationHintLines returns the recipes that activate a session on osName.
@@ -181,17 +289,10 @@ func writeProjectFile(key, val string) (string, error) {
 	replaced := false
 	if data, err := fsutil.ReadTextFile(path); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
+			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			name := trimmed
-			if i := strings.IndexAny(trimmed, "=:"); i > 0 {
-				name = strings.TrimSpace(trimmed[:i])
-			} else if fields := strings.Fields(trimmed); len(fields) > 0 {
-				name = fields[0]
-			}
-			if strings.EqualFold(name, key) {
+			if strings.EqualFold(entryKey(line), key) {
 				lines = append(lines, key+"="+val)
 				replaced = true
 				continue

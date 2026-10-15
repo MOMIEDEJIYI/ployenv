@@ -62,7 +62,10 @@ manage:
   ployenv adopt <lang>[@version] --root <dir>     explicitly register an existing directory
   ployenv uninstall <lang>@<version>          remove (adopted dirs are only unregistered)
   ployenv uninstall <lang> --all              remove every version of a runtime
-  ployenv use <lang>@<version> [--project]    set the global default / write .ployenv
+  ployenv use <lang>@<version> [-p]           set the global default (no -p) or
+                                              write .ployenv in this directory (-p)
+  ployenv use <lang>@none [-p]                clear that default / that .ployenv entry
+                                              (-p is short for --project)
 
 session activation (never modifies the system environment):
   ployenv env [--shell {{shells}}]    print the session environment, eval it yourself
@@ -166,6 +169,19 @@ func Run(args []string) int {
 		return 0
 	}
 	cmd, rest := args[0], args[1:]
+	if wantsHelp(rest) {
+		fmt.Print(helpText())
+		logx.Flush(config.RootDir())
+		return 0
+	}
+	// A flag the command does not accept must fail here, not disappear: silently
+	// ignoring it is how `config --set-default node none --project` changed the
+	// global default (I-31).
+	if err := rejectUnknownFlags(cmd, rest); err != nil {
+		logx.Errorf("%v", err)
+		logx.Flush(config.RootDir())
+		return 1
+	}
 	switch cmd {
 	case "help", "-h", "-help", "--help", "-?", "version", "-v", "--version":
 		// Pure help/version never touches the data directory.

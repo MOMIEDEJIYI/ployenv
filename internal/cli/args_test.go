@@ -140,3 +140,41 @@ func TestParseBoolFlag(t *testing.T) {
 		t.Fatalf("parseBoolFlag(off) = %v, %v; want false, nil", got, err)
 	}
 }
+
+func TestShortFlagAliasesResolveToLongNames(t *testing.T) {
+	_, flags := splitFlags([]string{"node@22", "-p", "-g"})
+	if !has(flags, "project") || !has(flags, "global") {
+		t.Errorf("aliases were not resolved: %v", flags)
+	}
+	if _, ok := flags["p"]; ok {
+		t.Errorf("the short spelling leaked through: %v", flags)
+	}
+}
+
+func TestRejectUnknownFlagsPointsAtWhatIsAccepted(t *testing.T) {
+	if err := rejectUnknownFlags("use", []string{"node@22", "-p"}); err != nil {
+		t.Errorf("use -p must be accepted: %v", err)
+	}
+	err := rejectUnknownFlags("use", []string{"node@22", "--nope"})
+	if err == nil {
+		t.Fatal("--nope must fail")
+	}
+	if !strings.Contains(err.Error(), "unknown flag --nope") || !strings.Contains(err.Error(), "--project") {
+		t.Errorf("the error must name the flag and what is accepted: %v", err)
+	}
+	// The trap this guards: config has no project scope, so the error says where
+	// a project pin is written instead of quietly changing the global default.
+	err = rejectUnknownFlags("config", []string{"--set-default", "node", "none", "--project"})
+	if err == nil || !strings.Contains(err.Error(), "ployenv use") {
+		t.Errorf("config --project must be refused with a hint: %v", err)
+	}
+	if err := rejectUnknownFlags("list", []string{"--json"}); err == nil {
+		t.Error("list takes no flags, so --json (handled before dispatch) must fail here")
+	}
+	if err := rejectUnknownFlags("use", []string{"--help"}); err != nil {
+		t.Errorf("--help is accepted everywhere: %v", err)
+	}
+	if err := rejectUnknownFlags("nope", []string{"--x"}); err != nil {
+		t.Errorf("an unknown command is dispatch's business: %v", err)
+	}
+}
