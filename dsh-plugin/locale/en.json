@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ployenv",
+    "description": "Local runtime version manager: install, pin and switch Node.js, Java, Go and Python, then activate the chosen versions in session shells."
+  }
+}

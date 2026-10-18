@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ployenv",
+    "description": "本地多运行时版本管理：安装、钉住与切换 Node.js / Java / Go / Python，并把选定版本注入会话 shell。"
+  }
+}

@@ -5,13 +5,16 @@
   "description": "DSH host plugin that drives the ployenv local runtime version manager from the chat (list/install/use runtimes, ship a ployenv binary, and inject its path list into session shells).",
   "main": "./index.js",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "index.js",
     "cordis.patch.yml",
     "README.md",
     "stub-smoke.mjs",
+    "locale",
     "bin"
   ],
   "scripts": {

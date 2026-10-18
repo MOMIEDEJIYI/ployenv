@@ -303,6 +303,22 @@ await clause('A5-help', 'the slash command answers help without calling the CLI'
   return String(help.text || '').split('\n')[0].slice(0, 60)
 })
 
+await clause('A6-manifest-meta', 'the package exports the metadata DSH reads for its plugin list', async () => {
+  const pluginDir = fileURLToPath(new URL('.', import.meta.url))
+  const pkg = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
+  assert.strictEqual(pkg.exports['./package.json'], './package.json', 'package.json must be exported: DSH falls back to it for display text')
+  assert.strictEqual(pkg.exports['./locale/*.json'], './locale/*.json', 'locale files must be exported')
+  assert.ok(pkg.files.includes('locale'), 'locale/ must ship in the npm package')
+  for (const lang of ['en', 'zh']) {
+    const meta = JSON.parse(readFileSync(join(pluginDir, 'locale', lang + '.json'), 'utf8')).meta
+    assert.strictEqual(typeof meta.title, 'string', lang + ': meta.title must be a string')
+    assert.ok(String(meta.title).trim() !== '', lang + ': meta.title must not be empty')
+    assert.strictEqual(typeof meta.description, 'string', lang + ': meta.description must be a string')
+    assert.ok(String(meta.description).trim() !== '', lang + ': meta.description must not be empty')
+  }
+  return 'exports + locale/en.json + locale/zh.json'
+})
+
 process.env.PATH = originalPath
 rmSync(work, { recursive: true, force: true })
 
