@@ -381,7 +381,7 @@ func TestSupportListsRuntimesWithTheirState(t *testing.T) {
 	makeVersion(t, "node", "21.0.0")
 
 	out := mustRunCLI(t, "support")
-	for _, want := range []string{"ployenv manages 4 runtimes", "node", "aliases:", "tools:", "mirror:", "installed: 21.0.0", "installed: none"} {
+	for _, want := range []string{"ployenv manages 5 runtimes", "node", "aliases:", "tools:", "mirror:", "installed: 21.0.0", "installed: none"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("support output is missing %q:\n%s", want, out)
 		}
@@ -400,8 +400,8 @@ func TestSupportListsRuntimesWithTheirState(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		t.Fatalf("decoding support --json: %v\n%s", err, out)
 	}
-	if len(rows) != 4 {
-		t.Fatalf("got %d runtimes, want 4", len(rows))
+	if len(rows) != 5 {
+		t.Fatalf("got %d runtimes, want 5", len(rows))
 	}
 	for _, r := range rows {
 		if r.Name == "node" {
