@@ -38,7 +38,16 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(root)
 		os.Exit(1)
 	}
+	// Run from the scratch root so an ancestor project file cannot leak in (I-34).
+	if err := os.Chdir(root); err != nil {
+		fmt.Fprintln(os.Stderr, "runtime tests: chdir:", err)
+		os.RemoveAll(root)
+		os.Exit(1)
+	}
 	code := m.Run()
+	// Windows cannot delete the process working directory, so step back out
+	// of it before cleanup (otherwise every test binary run leaks a temp dir).
+	_ = os.Chdir(os.TempDir())
 	os.RemoveAll(root)
 	os.Exit(code)
 }

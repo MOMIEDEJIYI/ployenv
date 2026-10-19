@@ -37,7 +37,18 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(base)
 		panic(err)
 	}
+	// Run the suite from a scratch directory: the product resolves a project file
+	// by walking up from the current directory, so a .ployenv / .tool-versions in
+	// any ancestor of the checkout would leak into these tests (I-34). The scratch
+	// dir only has %TEMP% above it.
+	if err := os.Chdir(base); err != nil {
+		os.RemoveAll(base)
+		panic(err)
+	}
 	code := m.Run()
+	// Windows cannot delete the process working directory, so step back out
+	// of it before cleanup (otherwise every test binary run leaks a temp dir).
+	_ = os.Chdir(os.TempDir())
 	os.RemoveAll(base)
 	os.Exit(code)
 }
