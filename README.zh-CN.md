@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**绿色单文件**的本地语言运行时版本管理器 —— 一套命令搞定
-**Node.js / Java / Go / Python** 的下载、安装、查看与切换。
+**绿色单文件**的本地运行时版本管理器 —— 一套命令搞定
+**Node.js / Java / Go / Python / Maven** 的下载、安装、查看与切换。
 
 不用装安装程序、不用账号、不做许可校验、不用登录，**也不改你的系统环境**。
 一个可执行文件放到哪，运行时和配置就存在哪。
@@ -95,9 +95,9 @@ python=3.12
 **已完成**
 
 - [x] 便携数据目录 + 首次运行基础配置
-- [x] Node.js / Java / Go / Python，各由一份内置 Spec 描述
+- [x] Node.js / Java / Go / Python / Maven，各由一份内置 Spec 描述
 - [x] 镜像回退，以及中断安全（`Ctrl+C` 不会留下残缺文件）
-- [x] Go 安装包的 SHA-256 校验（node / Java / Python 的校验和待补）
+- [x] 上游有校验和就校验：Go 用 SHA-256，Maven 用 SHA-512（node / Java / Python 的校验和待补）
 - [x] 会话级激活，不改系统环境
 - [x] `--json` 机器接口
 - [x] 预编译包随 GitHub Releases 发布（windows / linux / darwin × amd64 / arm64，附校验和）

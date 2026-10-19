@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A portable, single-binary version manager for local language runtimes —
-**Node.js, Java, Go and Python** — with nothing to install and nothing to
+A portable, single-binary version manager for local runtimes —
+**Node.js, Java, Go, Python and Maven** — with nothing to install and nothing to
 configure.
 
 No installer, no account, no licence checks, and **no changes to your system
@@ -104,9 +104,10 @@ Run `ployenv --help` for the built-in summary.
 **Done**
 
 - [x] Portable data directory, one-time base configuration
-- [x] Node.js, Java, Go and Python, each described by a built-in Spec
+- [x] Node.js, Java, Go, Python and Maven, each described by a built-in Spec
 - [x] Mirror fallback, and interrupt-safe cleanup (`Ctrl+C` leaves no partial files)
-- [x] SHA-256 verification for Go archives (node / Java / Python checksums still to come)
+- [x] Checksum verification where upstream publishes one: SHA-256 for Go archives,
+      SHA-512 for Maven (node / Java / Python checksums still to come)
 - [x] Session activation without touching the system environment
 - [x] `--json` machine interface
 - [x] Prebuilt archives published to GitHub Releases (windows / linux / darwin on
