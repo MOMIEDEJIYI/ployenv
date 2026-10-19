@@ -21,6 +21,11 @@ name: ci
 #   e2e-linux         -> linux/amd64 + linux/arm64 end-to-end (install / activate / inspect /
 #                        uninstall against the public upstream sources)
 #   e2e-windows-arm   -> the windows/arm64 half of NFR-806, same end-to-end in PowerShell
+#
+# runtime matrix (REQ-009 B3): ci/e2e-runtimes.tsv lists every runtime once;
+#   e2e-matrix-prepare -> turns that table into a matrix (changed rows only off a tag)
+#   e2e-runtime       -> one job per row, wall clock = the slowest row
+#   e2e-all           -> manual lane: every runtime in one data root and one shell
 
 on:
   push:
@@ -653,6 +658,158 @@ jobs:
           name: e2e-windows-arm64-report
           path: ${{ runner.temp }}/e2e-report.txt
           if-no-files-found: warn
+
+  # Runtime matrix (REQ-009 B3): ci/e2e-runtimes.tsv is the only place a runtime
+  # is named. The prepare job turns that table into a matrix, so adding rust or
+  # gradle is one data row (plus an optional ci/checks/<name>.sh hook) and this
+  # file does not change. Runtime semantics that cannot fit a row live in
+  # ci/checks/<name>.sh|ps1 and are run right after their row.
+  e2e-matrix-prepare:
+    name: prepare the runtime matrix
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.ref, 'refs/tags/')
+      || startsWith(github.ref, 'refs/heads/develop-v')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: read the runtime table
+        id: read
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, pathlib, subprocess
+
+          rows = []
+          for line in pathlib.Path("ci/e2e-runtimes.tsv").read_text(encoding="utf-8").splitlines():
+              if not line.strip() or line.lstrip().startswith("#"):
+                  continue
+              name, version, tool, args, expect, requires = line.split("\t")
+              rows.append({"name": name, "version": version, "tool": tool,
+                           "args": args, "expect": expect, "requires": requires})
+
+          # One entry per runner. A Windows entry exercises the .ps1 hooks; it is
+          # held back for now because a Windows/arm64 JDK is not published for
+          # every runtime in the table. Adding it is one tuple.
+          platforms = [("ubuntu-latest", "bash", "linux")]
+
+          # A release point runs every row; otherwise only the rows whose
+          # internal/runtime/<name>.go changed (no tag yet -> every row).
+          picked = rows
+          if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+              tag = subprocess.run(["git", "describe", "--tags", "--abbrev=0"],
+                                   capture_output=True, text=True).stdout.strip()
+              if tag:
+                  changed = subprocess.run(
+                      ["git", "diff", "--name-only", tag + "..HEAD", "--", "internal/runtime"],
+                      capture_output=True, text=True).stdout
+                  names = {pathlib.Path(p).stem for p in changed.split() if p.endswith(".go")}
+                  narrowed = [r for r in rows if r["name"] in names]
+                  if narrowed:
+                      picked = narrowed
+
+          include = [dict(row, runner=runner, shell=shell, os=kind)
+                     for row in picked for runner, shell, kind in platforms]
+          print("matrix=" + json.dumps({"include": include}))
+          PY
+          # Fail here instead of handing an empty matrix to the next job.
+          grep -q '"include": \[{' "$GITHUB_OUTPUT" || { echo '::error::the runtime table produced an empty matrix'; exit 1; }
+
+  e2e-runtime:
+    name: e2e ${{ matrix.name }} (${{ matrix.os }})
+    needs: e2e-matrix-prepare
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.ref, 'refs/tags/')
+      || startsWith(github.ref, 'refs/heads/develop-v')
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.e2e-matrix-prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build the binary under test
+        shell: bash
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o /tmp/ployenv ./cmd/ployenv
+          /tmp/ployenv --version
+      - name: one row of the table, end to end
+        shell: bash
+        env:
+          ROW_NAME: ${{ matrix.name }}
+          ROW_VERSION: ${{ matrix.version }}
+          ROW_TOOL: ${{ matrix.tool }}
+          ROW_ARGS: ${{ matrix.args }}
+          ROW_EXPECT: ${{ matrix.expect }}
+          ROW_REQUIRES: ${{ matrix.requires }}
+          PLOYENV_BIN: /tmp/ployenv
+        run: |
+          set -euo pipefail
+          export PLOYENV_ROOT="$(mktemp -d)"
+          "$PLOYENV_BIN" -y config --set-cache-keep true
+          if [ "$ROW_REQUIRES" != "-" ]; then
+            "$PLOYENV_BIN" -y install "$ROW_REQUIRES"
+            "$PLOYENV_BIN" use "$ROW_REQUIRES"
+          fi
+          "$PLOYENV_BIN" -y install "$ROW_NAME@$ROW_VERSION"
+          "$PLOYENV_BIN" use "$ROW_NAME@$ROW_VERSION"
+          eval "$("$PLOYENV_BIN" env --shell bash)"
+          out="$("$ROW_TOOL" $ROW_ARGS 2>&1 || true)"
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -Eq "$ROW_EXPECT" || {
+            echo "::error::$ROW_NAME: expected /$ROW_EXPECT/ from '$ROW_TOOL $ROW_ARGS'"
+            exit 1
+          }
+          echo "PASS $ROW_NAME: $(printf '%s' "$out" | head -1)"
+          hook="ci/checks/$ROW_NAME.sh"
+          if [ -f "$hook" ]; then bash "$hook"; fi
+
+  e2e-all:
+    name: e2e every runtime in one shell (manual)
+    # The parallel matrix gives every row its own data root; this lane is the
+    # coexistence case (one root, one eval, every runtime active at once).
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build the binary under test
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o /tmp/ployenv ./cmd/ployenv
+          /tmp/ployenv --version
+      - name: install every row into one data root and run them together
+        run: |
+          set -euo pipefail
+          export PLOYENV_ROOT="$(mktemp -d)"
+          export PLOYENV_BIN=/tmp/ployenv
+          "$PLOYENV_BIN" -y config --set-cache-keep true
+          while IFS=$'\t' read -r name version tool args expect requires; do
+            case "$name" in ''|'#'*) continue ;; esac
+            [ "$requires" = "-" ] || { "$PLOYENV_BIN" -y install "$requires"; "$PLOYENV_BIN" use "$requires"; }
+            "$PLOYENV_BIN" -y install "$name@$version"
+            "$PLOYENV_BIN" use "$name@$version"
+          done < ci/e2e-runtimes.tsv
+          eval "$("$PLOYENV_BIN" env --shell bash)"
+          while IFS=$'\t' read -r name version tool args expect requires; do
+            case "$name" in ''|'#'*) continue ;; esac
+            out="$("$tool" $args 2>&1 || true)"
+            printf '%s\n' "$out" | grep -Eq "$expect" || { echo "::error::$name: expected /$expect/ from '$tool $args'"; exit 1; }
+            if [ -f "ci/checks/$name.sh" ]; then bash "ci/checks/$name.sh"; fi
+            echo "PASS $name: $(printf '%s' "$out" | head -1)"
+          done < ci/e2e-runtimes.tsv
+          "$PLOYENV_BIN" doctor --json > /dev/null
+          echo 'PASS every runtime active in one shell'
 
   e2e-macos:
     name: e2e macos
