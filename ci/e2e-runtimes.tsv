@@ -1,0 +1,9 @@
+# One row per runtime; one generic CI loop reads it (REQ-009 B3).
+# name	version	tool	args	expect	requires
+# version is a prefix: a patch release never invalidates the table.
+# requires is an external dependency of the tool itself (- = none).
+node	20.20	node	--version	^v20\.	-
+java	21	java	-version	version "21\.	-
+go	1.22	go	version	go1\.22\.	-
+python	3.12	python	--version	^Python 3\.12\.	-
+maven	3.10	mvn	-v	^Apache Maven 3\.	java@21
