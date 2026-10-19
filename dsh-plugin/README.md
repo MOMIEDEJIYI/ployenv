@@ -1,7 +1,8 @@
 # dsh-plugin-ployenv
 
 DeepSeek Harness (DSH) host plugin that drives [ployenv](../README.md) - the local runtime version
-manager for Node / Java / Go / Python - from the chat.
+manager for node, java, go, python and maven - from the chat. The plugin passes the runtime family
+straight through to the CLI, so a new family lights up here as soon as the CLI supports it.
 
 It contributes:
 
@@ -179,6 +180,7 @@ version:   ["--version"]
 /ployenv install node@22 --from D:\node   take over an existing install instead of downloading
 /ployenv install node@22 --force          reinstall
 /ployenv uninstall node@20.11.1           uninstall
+/ployenv install maven@3.9.9             any runtime family works the same way (maven included)
 /ployenv use node@22.11.0                 set the global default
 /ployenv use node@22.11.0 --project       pin the current project (.ployenv)
 /ployenv current node                     effective version and its source
