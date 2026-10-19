@@ -69,7 +69,8 @@ manage:
 
 session activation (never modifies the system environment):
   ployenv env [--shell {{shells}}]    print the session environment, eval it yourself
-  ployenv shell [--shell ...]                 open a child terminal with it activated
+  ployenv shell [--shell ...]                 start a child shell in this window with the
+                                              environment applied (the child has its own history)
   note: "use" only records a version; activate with one of the two commands above.
 
 configuration:

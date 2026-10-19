@@ -122,7 +122,7 @@ explicitly. A flag the command does not accept is refused rather than ignored, s
 
 | Command | Description |
 |---|---|
-| `ployenv shell [--shell pwsh\|cmd\|bash]` | Open a child shell with the environment applied and the window title set to `[ployenv] <lang>@<version> - <dir>`. |
+| `ployenv shell [--shell pwsh\|cmd\|bash]` | Open a child shell **in the same window** with the environment applied and the window title set to `[ployenv] <lang>@<version> - <dir>` (terminals that ignore console titles will not show it). The child has its **own command history**; `exit` returns to the parent shell with its history and environment intact. |
 | `ployenv env [--shell pwsh\|cmd\|bash\|json]` | Print a script that applies the environment; eval it in the current shell. |
 | `ployenv env --json` | Print the same information as JSON. |
 
@@ -142,6 +142,15 @@ eval "$(ployenv env --shell bash)"
 :: cmd has no eval; open an activated child shell instead
 ployenv shell
 ```
+
+`ployenv shell` starts a **child** shell, so its command history starts empty. To apply
+the environment to the current `cmd` window instead (keeping its history):
+
+```bat
+ployenv env --shell cmd > %TEMP%\ployenv-env.bat && call %TEMP%\ployenv-env.bat
+```
+
+That keeps the history, but nothing is restored automatically when you leave the window.
 
 ### Cache
 

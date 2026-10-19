@@ -378,7 +378,7 @@ func cmdShell(rest []string, g globals) error {
 	if wd, err := os.Getwd(); err == nil {
 		title += " - " + filepath.Base(wd)
 	}
-	logx.Stepf("Activated. Close the child terminal to restore the previous environment.")
+	logx.Stepf("Entered a child shell in this window (it has its own command history); \"exit\" returns to the parent shell with its history and environment intact.")
 	return envx.Shell(value(flags, "shell"), entry, title)
 }
 

@@ -112,7 +112,7 @@ flag 会被**拒绝**而不是忽略 —— 因此 `--project` 再也不会被�
 
 | 命令 | 说明 |
 |---|---|
-| `ployenv shell [--shell pwsh\|cmd\|bash]` | 打开一个已应用环境的子终端，窗口标题设为 `[ployenv] <语言>@<版本> - <目录>`。 |
+| `ployenv shell [--shell pwsh\|cmd\|bash]` | 在**同一窗口**打开一个已应用环境的子 shell，窗口标题设为 `[ployenv] <语言>@<版本> - <目录>`（不显示控制台标题的终端看不到）。子 shell 有**独立的命令历史**；`exit` 回到父 shell 后历史与环境都在。 |
 | `ployenv env [--shell pwsh\|cmd\|bash\|json]` | 打印一段应用环境的脚本，由你在当前 shell 里 eval。 |
 | `ployenv env --json` | 以 JSON 输出同样的信息。 |
 
@@ -129,9 +129,18 @@ eval "$(ployenv env --shell bash)"
 ```
 
 ```bat
-:: cmd 没有 eval，请改为打开一个已激活的子终端
+:: cmd 没有 eval，请改为打开一个已激活的子 shell
 ployenv shell
 ```
+
+`ployenv shell` 开的是**子 shell**，命令历史从空开始。如果想在**当前 cmd 窗口**里应用环境
+（保留窗口已有的历史）：
+
+```bat
+ployenv env --shell cmd > %TEMP%\ployenv-env.bat && call %TEMP%\ployenv-env.bat
+```
+
+这样历史保留，但离开窗口时环境不会自动还原。
 
 ### 缓存
 
