@@ -23,6 +23,7 @@ const mavenMetadataXML = `<?xml version="1.0" encoding="UTF-8"?>
       <version>3.0-alpha-1</version>
       <version>3.9.6</version>
       <version>3.9.9</version>
+      <version>3.10.0-rc-1</version>
       <version>3.10.0</version>
       <version>4.0.0-rc-7</version>
     </versions>
@@ -83,10 +84,10 @@ func TestMavenListMarksPrereleasesAndFiltersPrefixes(t *testing.T) {
 	for _, r := range all {
 		notes[r.Version] = r.Note
 	}
-	if len(notes) != 5 {
-		t.Fatalf("mavenList(all) = %v, want all five versions", notes)
+	if len(notes) != 6 {
+		t.Fatalf("mavenList(all) = %v, want all six versions", notes)
 	}
-	for _, v := range []string{"3.0-alpha-1", "4.0.0-rc-7"} {
+	for _, v := range []string{"3.0-alpha-1", "3.10.0-rc-1", "4.0.0-rc-7"} {
 		if notes[v] != "preview" {
 			t.Errorf("%s: note = %q, want preview", v, notes[v])
 		}
@@ -105,6 +106,41 @@ func TestMavenListMarksPrereleasesAndFiltersPrefixes(t *testing.T) {
 
 	if _, err := mavenList("lts"); err == nil {
 		t.Error("maven has no LTS channel, so mavenList(lts) must explain that instead of guessing")
+	}
+}
+
+// A partial version is the dangerous shape: 3.10.0-rc-1 and 3.10.0 compare equal,
+// and the upstream index lists the candidate first, so a filter that merely
+// matched the prefix resolved `maven@3.10` to a release candidate.
+func TestMavenPartialVersionNeverResolvesToAReleaseCandidate(t *testing.T) {
+	mavenIndexServer(t, nil)
+
+	rels, err := mavenList("3.10")
+	if err != nil {
+		t.Fatalf("mavenList(3.10): %v", err)
+	}
+	if len(rels) != 1 || rels[0].Version != "3.10.0" {
+		t.Fatalf("mavenList(3.10) = %v, want only the stable 3.10.0", rels)
+	}
+	if got := highest(rels); got != "3.10.0" {
+		t.Errorf("maven@3.10 resolves to %q, want 3.10.0", got)
+	}
+}
+
+// The candidate stays reachable when the request names it, so a user can still
+// try one on purpose.
+func TestMavenExplicitPrereleaseStillResolves(t *testing.T) {
+	mavenIndexServer(t, nil)
+
+	rels, err := mavenList("3.10.0-rc-1")
+	if err != nil {
+		t.Fatalf("mavenList(3.10.0-rc-1): %v", err)
+	}
+	if len(rels) != 1 || rels[0].Version != "3.10.0-rc-1" {
+		t.Fatalf("mavenList(3.10.0-rc-1) = %v, want the candidate itself", rels)
+	}
+	if rels[0].Note != "preview" {
+		t.Errorf("note = %q, want preview", rels[0].Note)
 	}
 }
 

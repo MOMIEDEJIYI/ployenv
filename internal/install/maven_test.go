@@ -25,7 +25,10 @@ const mavenTestMetadata = `<?xml version="1.0" encoding="UTF-8"?>
   <versioning>
     <latest>4.0.0-rc-7</latest>
     <release>4.0.0-rc-7</release>
-    <versions><version>3.10.0</version></versions>
+    <versions>
+      <version>3.10.0-rc-1</version>
+      <version>3.10.0</version>
+    </versions>
   </versioning>
 </metadata>`
 
@@ -121,6 +124,21 @@ func TestEnsureRejectsATamperedMavenSHA512(t *testing.T) {
 	}
 	if _, serr := os.Stat(filepath.Join(config.CacheDir(), mavenTestArchiveName("3.10.0"))); !os.IsNotExist(serr) {
 		t.Error("the unverified archive must be removed")
+	}
+}
+
+// 3.10.0-rc-1 and 3.10.0 compare equal and the candidate comes first in the
+// index, so the partial request is the shape that used to install a candidate.
+func TestEnsureResolvesMavenPartialToTheStable(t *testing.T) {
+	resetSandbox(t)
+	mavenSource(t, true)
+
+	got, _, err := Ensure(runtime.Lookup("maven"), "3.10", Options{})
+	if err != nil {
+		t.Fatalf("Ensure(3.10): %v", err)
+	}
+	if got != "3.10.0" {
+		t.Errorf("maven@3.10 resolved to %q, want 3.10.0", got)
 	}
 }
 

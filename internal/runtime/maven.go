@@ -170,14 +170,25 @@ func mavenList(filter string) ([]Release, error) {
 	// A channel (or no filter at all) must never resolve to a release candidate:
 	// upstream's own <latest>/<release> both point at 4.0.0-rc-7.
 	stableOnly := f == "" || f == "latest" || f == "stable"
+	explicitPreview := mavenPreview.MatchString(f)
 	var out []Release
 	for _, v := range md.Versions {
 		preview := mavenPreview.MatchString(v)
-		if stableOnly && (preview || !mavenSupported(v)) {
-			continue
-		}
-		if !all && !stableOnly && !version.Matches(f, v) {
-			continue
+		if stableOnly {
+			if preview || !mavenSupported(v) {
+				continue
+			}
+		} else if !all {
+			// A partial request must not pull a release candidate in: `maven@3.10`
+			// resolved to 3.10.0-rc-1 because the two compare equal and the
+			// metadata lists the candidate first. Only a request that names a
+			// pre-release gets one.
+			if preview && !explicitPreview {
+				continue
+			}
+			if !version.Matches(f, v) {
+				continue
+			}
 		}
 		note := ""
 		if preview {
