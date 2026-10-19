@@ -12,7 +12,7 @@ test -z "${MAVEN_HOME:-}" || { echo "::error::env must not set MAVEN_HOME (got $
 rm -rf "$HOME/.m2"
 
 mvn -v | tee "$WORK/mvn-v.txt"
-grep -Eq '^Apache Maven 3\.' "$WORK/mvn-v.txt" || { echo '::error::maven is not a stable 3.x release'; exit 1; }
+grep -Eq '^Apache Maven 3\.[0-9]+\.[0-9]+ \(' "$WORK/mvn-v.txt" || { echo '::error::maven is not a stable 3.x release'; exit 1; }
 if grep -Eq '^Apache Maven 4\.' "$WORK/mvn-v.txt"; then echo '::error::a Maven release candidate was installed'; exit 1; fi
 JAVA_HOME="${JAVA_HOME:?ployenv env must export JAVA_HOME for maven}"
 grep -Fq "runtime: $JAVA_HOME" "$WORK/mvn-v.txt" || { echo "::error::mvn does not run on the JDK that ployenv activated ($JAVA_HOME)"; exit 1; }
