@@ -926,7 +926,7 @@ function registerTool(ctx, state) {
       type: 'object',
       properties: {
         action: { type: 'string', enum: TOOL_ACTIONS, description: 'Operation to perform.' },
-        runtime: { type: 'string', description: 'Runtime family: node (nodejs), java (jdk), go (golang), python (py), or maven.' },
+        runtime: { type: 'string', description: 'Runtime family: node (nodejs), java (jdk), go (golang), python (py), or maven (mvn).' },
         version: { type: 'string', description: 'Version for install/use/uninstall: exact (22.11.0), a major (22), lts, or latest.' },
         filter: { type: 'string', description: 'For action=available: a version filter such as 22 or lts.' },
         tool: { type: 'string', description: 'For action=which: the tool name, for example node or npm.' },

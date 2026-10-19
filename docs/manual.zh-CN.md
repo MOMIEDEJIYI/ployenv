@@ -27,9 +27,15 @@ ployenv 管理的是**语言运行时**，用短名称标识：
 | `java` | `jdk`、`openjdk`、`temurin` | `java`、`javac`、`jar`、`jshell`、`keytool` |
 | `go` | `golang` | `go`、`gofmt` |
 | `python` | `py`、`cpython` | `python`、`python3`、`pip`、`pip3` |
+| `maven` | `mvn` | `mvn`、`mvnDebug` |
 
 每个运行时都装在 `<数据目录>/versions/<名称>/<版本>/` 下，各自独立。
 ployenv 从不做系统级安装，也从不改写不属于自己的文件。
+
+**Maven 是工具，不是语言。** ployenv 只把 `<版本>/bin` 加入 `PATH`，**不设
+`MAVEN_HOME`/`M2_HOME`**（`mvn.cmd` 自己推导主目录），也**不碰 `settings.xml`
+或 `~/.m2`**。Maven 需要一个 JDK：用 ployenv 装的 `java`，或继续用你自己的
+`JAVA_HOME`，两种都可以；两者都不可用时，`ployenv doctor` 会在 stderr 给一行提示。
 
 版本写法有三种：
 
@@ -38,6 +44,10 @@ ployenv 从不做系统级安装，也从不改写不属于自己的文件。
 | 精确版本 | 完整版本号 | `ployenv install node@20.20.2` |
 | 部分版本 | 取匹配到的最高版本 | `ployenv install node@20` → `20.20.2` |
 | 通道 | 联网查询版本索引解析 | `ployenv install node@lts`、`node@latest` |
+
+Maven 的通道只走 3.x 线：`latest` / `stable` / 不带过滤取**最高的稳定 3.x**（当前 3.10.0）；
+上游 `<release>` 还指向 4.0 预发布版时 `@release` 会被拒绝；`maven@lts` 会明确报
+“没有 LTS 通道”；`ployenv available maven all` 会列出预发布版并标 `preview`。
 
 ## 数据目录
 
@@ -115,6 +125,9 @@ flag 会被**拒绝**而不是忽略 —— 因此 `--project` 再也不会被�
 | `ployenv shell [--shell pwsh\|cmd\|bash]` | 在**同一窗口**打开一个已应用环境的子 shell，窗口标题设为 `[ployenv] <语言>@<版本> - <目录>`（不显示控制台标题的终端看不到）。子 shell 有**独立的命令历史**；`exit` 回到父 shell 后历史与环境都在。 |
 | `ployenv env [--shell pwsh\|cmd\|bash\|json]` | 打印一段应用环境的脚本，由你在当前 shell 里 eval。 |
 | `ployenv env --json` | 以 JSON 输出同样的信息。 |
+
+对 `maven` 来说，脚本只在 `PATH` 前插入 `<版本>/bin`，不涉及 `MAVEN_HOME`、
+`M2_HOME` 或任何 Maven 配置。
 
 示例：
 
@@ -220,7 +233,7 @@ ployenv config --set-default node none       # 取消它（也可写 off / defau
 
 - 默认使用官方源。
 - 配置了镜像则优先使用；失败时回退官方源，最后还可回退到系统 `curl`。
-- 版本列表与下载可能使用不同端点：Java / Python 通过官方 API 取版本列表，而下载可以走镜像。
+- 版本列表与下载可能使用不同端点：Java / Python 通过官方 API 取版本列表，而下载可以走镜像。Maven 的版本列表走仓库形态基址（默认 Central），下载仍镜像优先；只提供分发包的镜像也能用于下载。
 - ployenv 绝不修改系统的 npm / pip 配置或环境变量。
 
 布局要求：
@@ -231,6 +244,7 @@ ployenv config --set-default node none       # 取消它（也可写 off / defau
 | `go` | Go 下载镜像，`<基址>/<文件>`。 |
 | `java` | Adoptium 风格的镜像，`<基址>/<主版本>/jdk/<arch>/<os>/<文件>`。 |
 | `python` | Windows：NuGet flat-container 基址。其他平台：GitHub Release 镜像，`<基址>/<tag>/<文件>`。 |
+| `maven` | **仓库形态**的基址（与 Central 同布局），`<基址>/<版本>/apache-maven-<版本>-bin.<ext>`。Apache 分发镜像（dlcdn、TUNA、阿里云、USTC）有安装包但**没有 `maven-metadata.xml`**：列版本时先试配置的基址一次、再走 Central；下载仍按"镜像优先"顺序。 |
 
 ```powershell
 ployenv config --set-mirror node https://registry.npmmirror.com/-/binary/node
