@@ -42,6 +42,9 @@ type Plan struct {
 	Bases  []string // ordered download bases (mirror first, then official)
 	URLFor func(base string) string
 	SHA256 string // optional integrity check
+	// SHA512 is the optional integrity check for upstreams that publish only a
+	// SHA-512 sidecar (Maven Central: .sha256 answers 404).
+	SHA512 string
 	Layout Layout
 }
 

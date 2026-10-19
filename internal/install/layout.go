@@ -2,6 +2,7 @@ package install
 
 import (
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"io"
 	"os"
@@ -83,6 +84,19 @@ func sha256File(p string) (string, error) {
 	}
 	defer f.Close()
 	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func sha512File(p string) (string, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha512.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}

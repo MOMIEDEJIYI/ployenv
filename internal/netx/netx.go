@@ -62,28 +62,44 @@ func ShortURL(u string) string {
 	return u
 }
 
-// GetJSON fetches a JSON document into v.
-func GetJSON(url string, v any) error {
+// getBytes fetches a small metadata document and returns its body.
+func getBytes(url string) ([]byte, error) {
 	req, cancel, err := newRequest(url, metadataTimeout)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer cancel()
 	logx.Capture("GET %s", url)
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return fmt.Errorf("GET %s returned HTTP %d %s", ShortURL(url), resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("GET %s returned HTTP %d %s", ShortURL(url), resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	body, err := io.ReadAll(resp.Body)
+	return io.ReadAll(resp.Body)
+}
+
+// GetJSON fetches a JSON document into v.
+func GetJSON(url string, v any) error {
+	body, err := getBytes(url)
 	if err != nil {
 		return err
 	}
 	return json.Unmarshal(body, v)
+}
+
+// GetText fetches a document as text. Some upstream indexes are XML rather than
+// JSON (Maven's maven-metadata.xml), so the body is returned as-is and the
+// caller parses it.
+func GetText(url string) (string, error) {
+	body, err := getBytes(url)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }
 
 // retrySleep is a seam so tests can exercise the retry loop without waiting out
@@ -103,4 +119,22 @@ func GetJSONRetry(url string, v any) error {
 		}
 	}
 	return err
+}
+
+// GetTextRetry is GetJSONRetry for a text document.
+func GetTextRetry(url string) (string, error) {
+	var (
+		out string
+		err error
+	)
+	for attempt := 1; attempt <= 3; attempt++ {
+		if out, err = GetText(url); err == nil {
+			return out, nil
+		}
+		logx.Verbosef("request failed (attempt %d): %v", attempt, err)
+		if attempt < 3 {
+			retrySleep(time.Duration(attempt*2) * time.Second)
+		}
+	}
+	return "", err
 }

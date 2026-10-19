@@ -130,8 +130,8 @@ func TestDownloadBasesPrefersMirrorAndDropsDuplicates(t *testing.T) {
 
 func TestBuiltInSpecsAreComplete(t *testing.T) {
 	specs := All()
-	if len(specs) != 4 {
-		t.Fatalf("All() returned %d runtimes, want 4", len(specs))
+	if len(specs) != 5 {
+		t.Fatalf("All() returned %d runtimes, want 5", len(specs))
 	}
 	for _, sp := range specs {
 		if sp.Name == "" || sp.Title == "" || sp.Kind == "" || sp.Primary == "" {
@@ -176,7 +176,7 @@ func TestRegistryLookupByNamesAndAliases(t *testing.T) {
 	if got := NamesText(); got != strings.Join(Names(), ", ") {
 		t.Fatalf("NamesText = %q", got)
 	}
-	if want := []string{"node", "java", "go", "python"}; !equalStrings(Names(), want) {
+	if want := []string{"node", "java", "go", "python", "maven"}; !equalStrings(Names(), want) {
 		t.Fatalf("Names = %v, want %v", Names(), want)
 	}
 	for _, sp := range All() {

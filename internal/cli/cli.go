@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/config"
+	"github.com/MOMIEDEJIYI/ployenv/internal/envx"
 	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
 	"github.com/MOMIEDEJIYI/ployenv/internal/jsonx"
 	"github.com/MOMIEDEJIYI/ployenv/internal/logx"
@@ -548,7 +549,36 @@ func cmdDoctor(rest []string, g globals) error {
 		fmt.Printf("      %s\n", hint)
 	}
 	fmt.Println()
-	return printResolutions(results, g)
+	err := printResolutions(results, g)
+	// Maven is the only runtime with an external dependency: it needs a JVM, and
+	// mvn.cmd's own failure ("JAVA_HOME ... not defined correctly") never says
+	// what to do. The hint goes to stderr so the report keeps its shape and
+	// --json stays untouched (REQ-009).
+	if note := mavenJavaHint(results); note != "" {
+		fmt.Fprintln(os.Stderr, note)
+	}
+	return err
+}
+
+// mavenJavaHint explains why an activated Maven would not run, and says nothing
+// when java is already reachable (managed by ployenv or configured by the user).
+func mavenJavaHint(results []resolve.Result) string {
+	active := false
+	for _, r := range results {
+		if r.Lang == "maven" && r.Configured() && r.Err == nil {
+			active = true
+			break
+		}
+	}
+	if !active {
+		return ""
+	}
+	problem := runtime.JavaProblem(envx.Build(results).Environ())
+	if problem == "" {
+		return ""
+	}
+	return "hint: maven needs a JDK, but " + problem +
+		". Run ployenv install java@21 and ployenv use java@21, or point JAVA_HOME at a JDK."
 }
 
 func yesNo(b bool) string {
