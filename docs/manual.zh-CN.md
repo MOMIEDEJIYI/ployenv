@@ -129,7 +129,7 @@ eval "$(ployenv env --shell bash)"
 ```
 
 ```bat
-:: cmd 没有 eval，请改为打开一个已激活的子 shell
+:: cmd 没有 eval，请改为打开一个已激活的子 shell（以下示例均在 cmd 中执行，不是 PowerShell）
 ployenv shell
 ```
 
@@ -137,6 +137,7 @@ ployenv shell
 （保留窗口已有的历史）：
 
 ```bat
+:: 这两行要在 cmd.exe 里执行；PowerShell 的 > 会写成 UTF-16LE，cmd 跑不了
 ployenv env --shell cmd > %TEMP%\ployenv-env.bat && call %TEMP%\ployenv-env.bat
 ```
 

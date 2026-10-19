@@ -139,7 +139,7 @@ eval "$(ployenv env --shell bash)"
 ```
 
 ```bat
-:: cmd has no eval; open an activated child shell instead
+:: cmd has no eval; open an activated child shell instead (run in cmd, not PowerShell)
 ployenv shell
 ```
 
@@ -147,6 +147,7 @@ ployenv shell
 the environment to the current `cmd` window instead (keeping its history):
 
 ```bat
+:: run these two lines in cmd.exe - PowerShell's `>` writes UTF-16LE and cmd cannot run that file
 ployenv env --shell cmd > %TEMP%\ployenv-env.bat && call %TEMP%\ployenv-env.bat
 ```
 
