@@ -692,13 +692,15 @@ jobs:
               rows.append({"name": name, "version": version, "tool": tool,
                            "args": args, "expect": expect, "requires": requires})
 
-          # One entry per runner. A Windows entry exercises the .ps1 hooks; it is
-          # held back for now because a Windows/arm64 JDK is not published for
-          # every runtime in the table. Adding it is one tuple.
-          platforms = [("ubuntu-latest", "bash", "linux")]
+          # One entry per platform. Runtime growth is free (one row); adding a
+          # PLATFORM is the one-time cost here plus one step pair in e2e-runtime
+          # (the shell differs), which is why the matrix carries shell/os.
+          platforms = [("ubuntu-latest", "bash", "linux"), ("windows-11-arm", "pwsh", "windows")]
 
           # A release point runs every row; otherwise only the rows whose
-          # internal/runtime/<name>.go changed (no tag yet -> every row).
+          # internal/runtime/<name>.go changed. The fallback below is load-bearing:
+          # a tag build diffs to an empty set, and an edit to registry.go/spec.go
+          # matches no stem, so "no rows picked" means "run everything".
           picked = rows
           if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
               tag = subprocess.run(["git", "describe", "--tags", "--abbrev=0"],
@@ -730,18 +732,37 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.e2e-matrix-prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    env:
+      # A fixed root (not mktemp) so the cache below can hold this row's install.
+      PLOYENV_ROOT: ${{ github.workspace }}/.ployenv-e2e
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - name: build the binary under test
+      - name: restore this row's runtime cache
+        uses: actions/cache@v4
+        with:
+          path: .ployenv-e2e
+          key: e2e-${{ matrix.os }}-${{ matrix.name }}-${{ matrix.version }}-${{ matrix.requires }}
+      - name: build the binary under test (linux)
+        if: matrix.os == 'linux'
         shell: bash
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o /tmp/ployenv ./cmd/ployenv
           /tmp/ployenv --version
-      - name: one row of the table, end to end
+      - name: build the binary under test (windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          $bin = Join-Path $env:RUNNER_TEMP 'ployenv.exe'
+          go build -trimpath -ldflags '-s -w' -o $bin ./cmd/ployenv
+          if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
+          & $bin --version
+      - name: one row of the table, end to end (linux)
+        if: matrix.os == 'linux'
         shell: bash
         env:
           ROW_NAME: ${{ matrix.name }}
@@ -753,7 +774,7 @@ jobs:
           PLOYENV_BIN: /tmp/ployenv
         run: |
           set -euo pipefail
-          export PLOYENV_ROOT="$(mktemp -d)"
+          mkdir -p "$PLOYENV_ROOT"
           "$PLOYENV_BIN" -y config --set-cache-keep true
           if [ "$ROW_REQUIRES" != "-" ]; then
             "$PLOYENV_BIN" -y install "$ROW_REQUIRES"
@@ -771,6 +792,39 @@ jobs:
           echo "PASS $ROW_NAME: $(printf '%s' "$out" | head -1)"
           hook="ci/checks/$ROW_NAME.sh"
           if [ -f "$hook" ]; then bash "$hook"; fi
+      - name: one row of the table, end to end (windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        env:
+          ROW_NAME: ${{ matrix.name }}
+          ROW_VERSION: ${{ matrix.version }}
+          ROW_TOOL: ${{ matrix.tool }}
+          ROW_ARGS: ${{ matrix.args }}
+          ROW_EXPECT: ${{ matrix.expect }}
+          ROW_REQUIRES: ${{ matrix.requires }}
+          PLOYENV_BIN: ${{ runner.temp }}\ployenv.exe
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path $env:PLOYENV_ROOT | Out-Null
+          & $env:PLOYENV_BIN -y config --set-cache-keep true
+          if ($LASTEXITCODE -ne 0) { throw 'config failed' }
+          if ($env:ROW_REQUIRES -ne '-') {
+            & $env:PLOYENV_BIN -y install $env:ROW_REQUIRES
+            if ($LASTEXITCODE -ne 0) { throw 'install requires failed' }
+            & $env:PLOYENV_BIN use $env:ROW_REQUIRES
+            if ($LASTEXITCODE -ne 0) { throw 'use requires failed' }
+          }
+          & $env:PLOYENV_BIN -y install "$($env:ROW_NAME)@$($env:ROW_VERSION)"
+          if ($LASTEXITCODE -ne 0) { throw 'install failed' }
+          & $env:PLOYENV_BIN use "$($env:ROW_NAME)@$($env:ROW_VERSION)"
+          if ($LASTEXITCODE -ne 0) { throw 'use failed' }
+          Invoke-Expression (& $env:PLOYENV_BIN env --shell pwsh | Out-String)
+          $out = (& $env:ROW_TOOL $env:ROW_ARGS 2>&1 | Out-String)
+          $out
+          if ($out -notmatch $env:ROW_EXPECT) { throw "$($env:ROW_NAME): expected /$($env:ROW_EXPECT)/ from '$($env:ROW_TOOL) $($env:ROW_ARGS)'" }
+          Write-Host "PASS $($env:ROW_NAME): $(($out -split "`n")[0].Trim())"
+          $hook = Join-Path 'ci/checks' ($env:ROW_NAME + '.ps1')
+          if (Test-Path -LiteralPath $hook) { . $hook }
 
   e2e-all:
     name: e2e every runtime in one shell (manual)
