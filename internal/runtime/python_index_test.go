@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -232,4 +233,25 @@ func TestPythonListAndPlanPerPlatform(t *testing.T) {
 			t.Fatalf("pythonList(latest) returned %d releases, want both assets", len(all))
 		}
 	})
+}
+
+func TestPythonReleasesPagesInSmallBatches(t *testing.T) {
+	var queries []string
+	body := fmt.Sprintf(`[{"tag_name":"20241016","assets":[{"name":"cpython-3.12.7+20241016-%s","browser_download_url":"https://github.invalid/a.tar.gz"}]}]`, pythonAssetSuffix())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	override(t, &pythonReleasesURL, srv.URL)
+
+	if _, err := pythonAssetList(); err != nil {
+		t.Fatalf("pythonAssetList: %v", err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("made %d requests, want 1 (a short page ends the walk): %v", len(queries), queries)
+	}
+	if !strings.Contains(queries[0], "per_page=10") || !strings.Contains(queries[0], "page=1") {
+		t.Errorf("query = %q, want small pages (the 40-release request answered 504)", queries[0])
+	}
 }

@@ -163,9 +163,38 @@ type pythonAsset struct {
 	Tag     string
 }
 
+const (
+	// A single per_page=40 response is large enough that api.github.com has
+	// answered 504 for it; per_page=10 consistently succeeds. Four pages keep the
+	// same 40-release window in small, retryable chunks.
+	pythonReleasesPerPage = 10
+	pythonReleasesPages   = 4
+)
+
+// pythonReleases fetches the release index in small pages. Later pages are
+// best effort: a transient failure must not hide the versions already seen.
+func pythonReleases() ([]githubRelease, error) {
+	var all []githubRelease
+	for page := 1; page <= pythonReleasesPages; page++ {
+		var rels []githubRelease
+		url := fmt.Sprintf("%s?per_page=%d&page=%d", pythonReleasesURL, pythonReleasesPerPage, page)
+		if err := netx.GetJSONRetry(url, &rels); err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break
+		}
+		all = append(all, rels...)
+		if len(rels) < pythonReleasesPerPage {
+			break
+		}
+	}
+	return all, nil
+}
+
 func pythonAssetList() ([]pythonAsset, error) {
-	var rels []githubRelease
-	if err := netx.GetJSONRetry(pythonReleasesURL+"?per_page=40", &rels); err != nil {
+	rels, err := pythonReleases()
+	if err != nil {
 		return nil, err
 	}
 	suffix := pythonAssetSuffix()
