@@ -741,10 +741,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: restore this row's runtime cache
+      - name: restore this row's download cache
         uses: actions/cache@v4
         with:
-          path: .ployenv-e2e
+          # Only the archives: a cache hit must still extract and verify the
+          # download, and an old install must never be restored over a new one.
+          path: .ployenv-e2e/cache
           key: e2e-${{ matrix.os }}-${{ matrix.name }}-${{ matrix.version }}-${{ matrix.requires }}
       - name: build the binary under test (linux)
         if: matrix.os == 'linux'
@@ -775,6 +777,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$PLOYENV_ROOT"
+          # The cache only carries archives; start from an empty versions tree so a
+          # stale install (or a retired candidate) can never be picked up again.
+          rm -rf "$PLOYENV_ROOT/versions"
           "$PLOYENV_BIN" -y config --set-cache-keep true
           # Upstream registries occasionally answer 5xx for a few minutes (python's
           # index does); retry the download twice before failing the row.
@@ -816,6 +821,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path $env:PLOYENV_ROOT | Out-Null
+          # The cache only carries archives; start from an empty versions tree.
+          Remove-Item -LiteralPath (Join-Path $env:PLOYENV_ROOT 'versions') -Recurse -Force -ErrorAction SilentlyContinue
           & $env:PLOYENV_BIN -y config --set-cache-keep true
           if ($LASTEXITCODE -ne 0) { throw 'config failed' }
           function Install-Retry([string]$Spec) {
