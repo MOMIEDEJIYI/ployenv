@@ -18,7 +18,11 @@ if ($out -match '(?m)^Apache Maven 4\.') { throw 'a Maven release candidate was 
 if (-not $env:JAVA_HOME) { throw 'ployenv env must export JAVA_HOME for maven' }
 if (-not $out.Contains($env:JAVA_HOME)) { throw "mvn does not run on the JDK that ployenv activated ($($env:JAVA_HOME))" }
 if (Test-Path -LiteralPath $m2) { throw 'mvn wrote ~/.m2' }
-if ($null -eq (Get-ChildItem -Path (Join-Path $env:PLOYENV_ROOT 'versions\maven\*\bin\mvn.cmd') | Select-Object -First 1)) { throw 'the mvn wrapper is missing under the managed root' }
+$mvnCmd = (Get-Command mvn -ErrorAction SilentlyContinue).Source
+$managed = Join-Path $env:PLOYENV_ROOT 'versions\maven'
+if (-not $mvnCmd -or -not $mvnCmd.StartsWith($managed, [StringComparison]::OrdinalIgnoreCase)) {
+  throw "mvn resolves to '$mvnCmd', not a ployenv-managed install"
+}
 
 $refusals = Join-Path $work 'mvn-release.txt'
 & $bin install maven@release *> $refusals

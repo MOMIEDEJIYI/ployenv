@@ -17,7 +17,11 @@ if grep -Eq '^Apache Maven 4\.' "$WORK/mvn-v.txt"; then echo '::error::a Maven r
 JAVA_HOME="${JAVA_HOME:?ployenv env must export JAVA_HOME for maven}"
 grep -Fq "runtime: $JAVA_HOME" "$WORK/mvn-v.txt" || { echo "::error::mvn does not run on the JDK that ployenv activated ($JAVA_HOME)"; exit 1; }
 test ! -e "$HOME/.m2" || { echo "::error::mvn wrote ~/.m2"; exit 1; }
-test -x "$PLOYENV_ROOT"/versions/maven/*/bin/mvn || { echo "::error::the mvn wrapper is not executable"; exit 1; }
+mvn_path="$(command -v mvn || true)"
+case "$mvn_path" in
+  "$PLOYENV_ROOT"/versions/maven/*/bin/mvn) ;;
+  *) echo "::error::mvn resolves to '$mvn_path', not a ployenv-managed install"; exit 1 ;;
+esac
 
 if "$BIN" install maven@release > "$WORK/mvn-release.txt" 2>&1; then
   echo '::error::@release must be refused while upstream <release> is 4.0.0-rc-7'

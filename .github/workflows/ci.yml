@@ -776,11 +776,21 @@ jobs:
           set -euo pipefail
           mkdir -p "$PLOYENV_ROOT"
           "$PLOYENV_BIN" -y config --set-cache-keep true
+          # Upstream registries occasionally answer 5xx for a few minutes (python's
+          # index does); retry the download twice before failing the row.
+          install_retry() {
+            for attempt in 1 2 3; do
+              "$PLOYENV_BIN" -y install "$1" && return 0
+              echo "install $1 failed (attempt $attempt), retrying"
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
           if [ "$ROW_REQUIRES" != "-" ]; then
-            "$PLOYENV_BIN" -y install "$ROW_REQUIRES"
+            install_retry "$ROW_REQUIRES"
             "$PLOYENV_BIN" use "$ROW_REQUIRES"
           fi
-          "$PLOYENV_BIN" -y install "$ROW_NAME@$ROW_VERSION"
+          install_retry "$ROW_NAME@$ROW_VERSION"
           "$PLOYENV_BIN" use "$ROW_NAME@$ROW_VERSION"
           eval "$("$PLOYENV_BIN" env --shell bash)"
           out="$("$ROW_TOOL" $ROW_ARGS 2>&1 || true)"
@@ -808,14 +818,21 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:PLOYENV_ROOT | Out-Null
           & $env:PLOYENV_BIN -y config --set-cache-keep true
           if ($LASTEXITCODE -ne 0) { throw 'config failed' }
+          function Install-Retry([string]$Spec) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              & $env:PLOYENV_BIN -y install $Spec
+              if ($LASTEXITCODE -eq 0) { return }
+              Write-Host "install $Spec failed (attempt $attempt), retrying"
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+            throw "install $Spec failed after 3 attempts"
+          }
           if ($env:ROW_REQUIRES -ne '-') {
-            & $env:PLOYENV_BIN -y install $env:ROW_REQUIRES
-            if ($LASTEXITCODE -ne 0) { throw 'install requires failed' }
+            Install-Retry $env:ROW_REQUIRES
             & $env:PLOYENV_BIN use $env:ROW_REQUIRES
             if ($LASTEXITCODE -ne 0) { throw 'use requires failed' }
           }
-          & $env:PLOYENV_BIN -y install "$($env:ROW_NAME)@$($env:ROW_VERSION)"
-          if ($LASTEXITCODE -ne 0) { throw 'install failed' }
+          Install-Retry "$($env:ROW_NAME)@$($env:ROW_VERSION)"
           & $env:PLOYENV_BIN use "$($env:ROW_NAME)@$($env:ROW_VERSION)"
           if ($LASTEXITCODE -ne 0) { throw 'use failed' }
           Invoke-Expression (& $env:PLOYENV_BIN env --shell pwsh | Out-String)
@@ -848,10 +865,18 @@ jobs:
           export PLOYENV_ROOT="$(mktemp -d)"
           export PLOYENV_BIN=/tmp/ployenv
           "$PLOYENV_BIN" -y config --set-cache-keep true
+          install_retry() {
+            for attempt in 1 2 3; do
+              "$PLOYENV_BIN" -y install "$1" && return 0
+              echo "install $1 failed (attempt $attempt), retrying"
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
           while IFS=$'\t' read -r name version tool args expect requires; do
             case "$name" in ''|'#'*) continue ;; esac
-            [ "$requires" = "-" ] || { "$PLOYENV_BIN" -y install "$requires"; "$PLOYENV_BIN" use "$requires"; }
-            "$PLOYENV_BIN" -y install "$name@$version"
+            [ "$requires" = "-" ] || { install_retry "$requires"; "$PLOYENV_BIN" use "$requires"; }
+            install_retry "$name@$version"
             "$PLOYENV_BIN" use "$name@$version"
           done < ci/e2e-runtimes.tsv
           eval "$("$PLOYENV_BIN" env --shell bash)"
