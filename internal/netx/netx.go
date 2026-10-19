@@ -54,9 +54,24 @@ var (
 // only ever sent over https to the API host above; ployenv never logs it.
 func githubToken() string { return strings.TrimSpace(os.Getenv("GITHUB_TOKEN")) }
 
+// wantsToken reports whether a request to rawurl would carry the ambient token.
+func wantsToken(rawurl string) bool {
+	u, err := neturl.Parse(rawurl)
+	if err != nil || u.Host != githubAPIHost || u.Scheme != githubAPIScheme {
+		return false
+	}
+	return githubToken() != ""
+}
+
 // newRequest builds a GET that expires after timeout. The caller owns the
 // returned cancel function and must call it once the body is closed.
 func newRequest(url string, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
+	return newRequestFor(url, timeout, true)
+}
+
+// newRequestFor is newRequest with the token decision spelled out, so a rejected
+// token can be retried anonymously.
+func newRequestFor(url string, timeout time.Duration, withToken bool) (*http.Request, context.CancelFunc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -67,10 +82,8 @@ func newRequest(url string, timeout time.Duration) (*http.Request, context.Cance
 	req.Header.Set("Accept", "*/*")
 	// api.github.com rate-limits anonymous callers hard; an ambient token lifts
 	// the quota a lot. Only that origin gets it (never a mirror or CDN).
-	if u, err := neturl.Parse(url); err == nil && u.Host == githubAPIHost && u.Scheme == githubAPIScheme {
-		if token := githubToken(); token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
+	if withToken && wantsToken(url) {
+		req.Header.Set("Authorization", "Bearer "+githubToken())
 	}
 	return req, cancel, nil
 }
@@ -85,22 +98,41 @@ func ShortURL(u string) string {
 
 // getBytes fetches a small metadata document and returns its body.
 func getBytes(url string) ([]byte, error) {
-	req, cancel, err := newRequest(url, metadataTimeout)
+	body, status, err := getBytesWith(url, true)
+	if err == nil {
+		return body, nil
+	}
+	// A stale ambient token must not turn a request that works anonymously into a
+	// failure: api.github.com answers 401 for a bad credential but 200 without one.
+	if (status == http.StatusUnauthorized || status == http.StatusForbidden) && wantsToken(url) {
+		logx.Verbosef("api.github.com rejected the ambient GITHUB_TOKEN (HTTP %d); retrying anonymously", status)
+		if body, _, anonErr := getBytesWith(url, false); anonErr == nil {
+			return body, nil
+		}
+	}
+	return nil, err
+}
+
+// getBytesWith performs one GET, reporting the status code alongside the error so
+// the caller can tell a rejected credential from any other failure.
+func getBytesWith(url string, withToken bool) ([]byte, int, error) {
+	req, cancel, err := newRequestFor(url, metadataTimeout, withToken)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer cancel()
 	logx.Capture("GET %s", url)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return nil, fmt.Errorf("GET %s returned HTTP %d %s", ShortURL(url), resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, resp.StatusCode, fmt.Errorf("GET %s returned HTTP %d %s", ShortURL(url), resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	return body, resp.StatusCode, err
 }
 
 // GetJSON fetches a JSON document into v.
