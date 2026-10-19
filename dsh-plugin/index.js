@@ -1,6 +1,6 @@
 /**
  * DSH host plugin for ployenv, the local runtime version manager
- * (node / java / go / python).
+ * (node / java / go / python / maven).
  *
  * It contributes one human slash command and one model-callable tool that both
  * shell out to the ployenv CLI with node:child_process, and it publishes the
@@ -145,7 +145,7 @@ const TOOL_ACTIONS = [
 /** Boolean flags ployenv itself recognizes (internal/cli/args.go boolFlags). */
 const BOOL_FLAGS = new Set(['force', 'global', 'project', 'dry-run', 'json', 'verbose', 'quiet', 'debug', 'log', 'no-color', 'help', 'all', 'yes', 'clean'])
 
-const TOOL_DESCRIPTION = 'Manage local language runtimes (node, java, go, python) through ployenv. '
+const TOOL_DESCRIPTION = 'Manage local language runtimes (node, java, go, python, maven) through ployenv. '
   + 'list shows installed versions; available lists installable versions; '
   + 'install downloads and installs <runtime>@<version> (version may be exact, a major like 22, lts, or latest); '
   + 'uninstall removes a version; use switches the global default, or pins the current project with flag --project; '
@@ -926,7 +926,7 @@ function registerTool(ctx, state) {
       type: 'object',
       properties: {
         action: { type: 'string', enum: TOOL_ACTIONS, description: 'Operation to perform.' },
-        runtime: { type: 'string', description: 'Runtime family: node (nodejs), java (jdk), go (golang), or python (py).' },
+        runtime: { type: 'string', description: 'Runtime family: node (nodejs), java (jdk), go (golang), python (py), or maven.' },
         version: { type: 'string', description: 'Version for install/use/uninstall: exact (22.11.0), a major (22), lts, or latest.' },
         filter: { type: 'string', description: 'For action=available: a version filter such as 22 or lts.' },
         tool: { type: 'string', description: 'For action=which: the tool name, for example node or npm.' },
