@@ -183,3 +183,66 @@ func TestGetJSONIntoStructWithNestedValues(t *testing.T) {
 		t.Errorf("decoded %+v, want lts=22.11.0 with two versions", got)
 	}
 }
+
+func TestGitHubTokenIsSentOnlyToTheAPIOrigin(t *testing.T) {
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+
+	oldHost, oldScheme := githubAPIHost, githubAPIScheme
+	githubAPIHost, githubAPIScheme = strings.TrimPrefix(ts.URL, "http://"), "http"
+	defer func() { githubAPIHost, githubAPIScheme = oldHost, oldScheme }()
+
+	t.Setenv("GITHUB_TOKEN", "t0ken")
+	if _, err := GetText(ts.URL + "/index.json"); err != nil {
+		t.Fatalf("GetText: %v", err)
+	}
+	if gotAuth != "Bearer t0ken" {
+		t.Errorf("Authorization = %q, want %q for the API origin", gotAuth, "Bearer t0ken")
+	}
+
+	// The token must not travel to any other origin (a mirror or CDN).
+	gotAuth = ""
+	githubAPIHost = "api.example.invalid"
+	if _, err := GetText(ts.URL + "/index.json"); err != nil {
+		t.Fatalf("GetText: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("the token leaked to a non-GitHub origin: %q", gotAuth)
+	}
+
+	// Plain http is never good enough for a credential.
+	gotAuth = ""
+	githubAPIHost = strings.TrimPrefix(ts.URL, "http://")
+	githubAPIScheme = "https"
+	if _, err := GetText(ts.URL + "/index.json"); err != nil {
+		t.Fatalf("GetText: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("the token was sent over http: %q", gotAuth)
+	}
+}
+
+func TestNoAmbientTokenMeansNoAuthorizationHeader(t *testing.T) {
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+
+	oldHost, oldScheme := githubAPIHost, githubAPIScheme
+	githubAPIHost, githubAPIScheme = strings.TrimPrefix(ts.URL, "http://"), "http"
+	defer func() { githubAPIHost, githubAPIScheme = oldHost, oldScheme }()
+
+	t.Setenv("GITHUB_TOKEN", "")
+	if _, err := GetText(ts.URL + "/index.json"); err != nil {
+		t.Fatalf("GetText: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty when no token is configured", gotAuth)
+	}
+}

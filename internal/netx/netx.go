@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -40,6 +42,18 @@ var client = &http.Client{
 	// metadata and downloads can use different budgets (BUG-007).
 }
 
+// GitHub API requests may authenticate with the ambient token. The two seams
+// below keep that decision testable and keep the token away from every other
+// host (mirrors, CDNs, release pages).
+var (
+	githubAPIHost   = "api.github.com"
+	githubAPIScheme = "https"
+)
+
+// githubToken returns the token from the environment, or "" when unset. It is
+// only ever sent over https to the API host above; ployenv never logs it.
+func githubToken() string { return strings.TrimSpace(os.Getenv("GITHUB_TOKEN")) }
+
 // newRequest builds a GET that expires after timeout. The caller owns the
 // returned cancel function and must call it once the body is closed.
 func newRequest(url string, timeout time.Duration) (*http.Request, context.CancelFunc, error) {
@@ -51,6 +65,13 @@ func newRequest(url string, timeout time.Duration) (*http.Request, context.Cance
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
+	// api.github.com rate-limits anonymous callers hard; an ambient token lifts
+	// the quota a lot. Only that origin gets it (never a mirror or CDN).
+	if u, err := neturl.Parse(url); err == nil && u.Host == githubAPIHost && u.Scheme == githubAPIScheme {
+		if token := githubToken(); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
 	return req, cancel, nil
 }
 
