@@ -44,7 +44,8 @@
     "node",
     "go",
     "python",
-    "java"
+    "java",
+    "maven"
   ],
   "author": "MOMIEDEJIYI",
   "publishConfig": {
@@ -55,7 +56,7 @@
       "patch": "./cordis.patch.yml"
     },
     "compatibility": {
-      "dsh": ">=0.1.7-rc.1 <0.2.0 || 0.2.0-rc.2",
+      "dsh": ">=0.1.7-rc.1 <0.3.0 || 0.2.0-rc.2",
       "node": ">=20.18",
       "profiles": [
         "web",
