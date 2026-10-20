@@ -13,9 +13,11 @@
       #   commandName      slash-command name (default: ployenv)
       #   toolName         model tool name (default: ployenv)
       #   root             ployenv data root, passed to the child as
-      #                    PLOYENV_ROOT (default when the bundled binary is used:
-      #                    <package>/data/ployenv; set it to keep data outside
-      #                    the package across plugin updates)
+      #                    PLOYENV_ROOT. Defaults, in order: the harness process
+      #                    PLOYENV_ROOT when set, else <package>/data/ployenv for the
+      #                    bundled or setup-installed binary (a configured bin keeps
+      #                    the environment's own root). Set it to keep data outside
+      #                    the package across plugin updates.
       #   timeoutMs        per-invocation timeout (default: 120000)
       #   injectPathAtLoad true prepends the directories reported by
       #                    "env --shell json" to the harness process PATH as

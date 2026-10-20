@@ -974,7 +974,15 @@ export function apply(ctx, config) {
   const resolved = resolveBinary(configuredBin)
   options.bin = resolved.bin
   const ownsRoot = resolved.bundled || resolved.source === 'setup'
-  const root = ownsRoot ? (options.root !== undefined ? options.root : PLUGIN_DATA_ROOT) : options.root
+  // A bundled or setup-installed copy carries its own portable data root, but an
+  // explicit PLOYENV_ROOT still wins: the operator asked for that root globally,
+  // and sharing it keeps runtimes across plugin reinstalls.
+  // Read the operator's root with the same trim the CLI applies; a blank value
+  // must not create a whitespace-named directory or be echoed as the root.
+  const ambientRaw = process.env.PLOYENV_ROOT
+  const ambientRoot = typeof ambientRaw === 'string' && ambientRaw.trim() !== '' ? ambientRaw.trim() : undefined
+  const defaultRoot = ambientRoot !== undefined ? ambientRoot : PLUGIN_DATA_ROOT
+  const root = ownsRoot ? (options.root !== undefined ? options.root : defaultRoot) : options.root
   if (root !== undefined) {
     try { mkdirSync(root, { recursive: true }) } catch (error) { void error }
   }

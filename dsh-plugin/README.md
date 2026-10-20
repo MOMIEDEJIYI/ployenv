@@ -144,7 +144,7 @@ optional and unknown fields are ignored.
 | Field | Default | Meaning |
 |---|---|---|
 | `bin` | unset | ployenv executable (absolute path or PATH name). Set it to pin your own build; it overrides the bundled copy. |
-| `root` | unset | ployenv data root passed to the child as `PLOYENV_ROOT`. When the bundled binary is used the default is `<package>/data/ployenv`, so uninstalling the plugin removes the runtimes with it. Set it to keep data outside the package (it survives plugin updates). |
+| `root` | unset | ployenv data root passed to the child as `PLOYENV_ROOT`. Defaults: the harness process `PLOYENV_ROOT` when set, else `<package>/data/ployenv` for the bundled or setup-installed binary (a configured `bin` keeps the environment's own root). A root inside the package is removed with the plugin on uninstall; set it to keep runtimes outside the package (they survive plugin updates). |
 | `commandName` | `ployenv` | Slash-command name; must match `^[a-z][a-z0-9_-]*$`. |
 | `toolName` | `ployenv` | Model tool name. |
 | `timeoutMs` | `120000` | Per-invocation deadline. Install downloads can exceed it; raise it if needed. |
@@ -288,8 +288,9 @@ Installing this package is meant to be enough - no separate ployenv download:
 
 - a ployenv binary ships in the package (`bin/win32-x64/ployenv.exe` today; the same
   `bin/<platform>-<arch>/` layout is used for any other bundled copy later);
-- when that bundled binary is used, its data root is `<package>/data/ployenv` (passed to the child as
-  `PLOYENV_ROOT`), so **uninstalling the plugin removes the installed runtimes too**;
+- when that bundled binary is used, its data root is the harness process `PLOYENV_ROOT` when set,
+  else `<package>/data/ployenv` (passed to the child as `PLOYENV_ROOT`), so a package-internal root
+  means **uninstalling the plugin removes the installed runtimes too**;
 - if you already have your own ployenv (row `bin` / `PLOYENV_BIN` / `PLOYENV_ROOT`), the plugin
   **reuses it and never touches the bundled copy** - the plugin package and the ployenv distribution stay
   independent;
@@ -325,7 +326,7 @@ own data root. It is **plugin-side**: nothing is passed to the CLI, and no file 
 | Verify order | the digest is checked **before** anything is written; a mismatch exits non-zero and leaves no file (NFR-302) |
 | Platforms | every published target (`windows`/`linux`/`darwin` x `amd64`/`arm64`); a host without an asset fails loudly and tells you to pass `url` |
 | After setup | `bin`/`status` report `bin source: setup`, and `status` also prints `setup: <url> @ <time>` |
-| Data root | still `<package>/data/ployenv` unless row config `root` overrides it, so **uninstalling the plugin removes both the binary and the runtimes** |
+| Data root | row config `root`, else the harness process `PLOYENV_ROOT`, else `<package>/data/ployenv` - so a package-internal root means **uninstalling the plugin removes both the binary and the runtimes** |
 
 ## Verified / unverified
 
