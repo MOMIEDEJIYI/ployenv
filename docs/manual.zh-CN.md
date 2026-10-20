@@ -72,6 +72,41 @@ Maven 的通道只走 3.x 线：`latest` / `stable` / 不带过滤取**最高的
 
 **首次运行。** 当 `config.json` 不存在时，ployenv 会执行一次基础配置：打印探测到的数据目录，确认后再写入配置。在管道 / 非 TTY 环境，或加了 `--yes` 时，自动采用默认值继续。
 
+## 与 DSH 插件共用一份 ployenv
+
+装了 DSH 插件 `dsh-plugin-ployenv` 时，它默认**自带**一份 ployenv，数据放在插件包内
+（`<插件包>/data/ployenv`），因此卸载/升级插件会带走里面装好的运行时。如果你已经自己装了
+ployenv（例如 `E:\PloyEnv`），可以让插件和命令行**共用同一份程序与数据**：
+
+1. 设置**用户**环境变量，让插件用你的二进制：
+
+   ```text
+   PLOYENV_BIN = E:\PloyEnv\ployenv.exe
+   ```
+
+2. 让数据根落在同一个目录（二选一即可）：
+
+   - **不设** `PLOYENV_ROOT`：CLI 默认用**可执行文件旁的目录**（这里就是 `E:\PloyEnv`）；
+   - 或显式设置 `PLOYENV_ROOT = E:\PloyEnv`。
+
+3. 想让命令行直接敲 `ployenv`（可选）：把 `E:\PloyEnv` 加进用户 `PATH`。
+
+4. **完全退出并重新打开 DSH**（环境变量在进程启动时读入；设完变量后新开的程序才能看到）。
+
+5. 在 DSH 里验证 `/ployenv status`，应显示：
+
+   ```text
+   bin:        E:\PloyEnv\ployenv.exe
+   bin source: PLOYENV_BIN
+   root:       E:\PloyEnv
+   ```
+
+之后终端与 DSH 共用同一批运行时；**卸载或升级插件都不会影响 `E:\PloyEnv` 里的数据**。
+
+> 想改回插件自带的那份：删掉 `PLOYENV_BIN`（和 `PLOYENV_ROOT`）再重启 DSH。
+> 解析优先级 —— 二进制：行配置 `bin` > `PLOYENV_BIN` > `PLOYENV_ROOT\ployenv.exe` >
+> setup 自装件 > 包内自带 > PATH；数据根：行配置 `root` > `PLOYENV_ROOT` > 包内 `data/ployenv`。
+
 ## 命令
 
 ### 查询
