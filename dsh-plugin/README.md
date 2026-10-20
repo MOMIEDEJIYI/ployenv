@@ -12,7 +12,7 @@ It contributes:
 both of which shell out to the ployenv CLI with `node:child_process`, plus a
 `DSH_PLOYENV_*` environment fact triple for session shell tools.
 
-Written against **ployenv 0.5.0** (the 0.2.0 session model is unchanged: no shim executables, no shim/root
+Written against **ployenv 0.5.1** (the 0.2.0 session model is unchanged: no shim executables, no shim/root
 commands, and nothing is ever written to PATH or the registry). Since 0.3.0 the package is **self-contained** -
 it ships a ployenv binary for its platform, so installing the plugin is enough (REQ-003). Since **REQ-003
 FR-303** it can also **install the released binary itself** through its own `setup` action (SHA-256 verified,
@@ -278,7 +278,7 @@ and in CI (`.github/workflows/ci.yml`, job `plugin-smoke`).
 
 ## Self-contained install (REQ-003)
 
-> Shipped in **v0.5.0**. The bundled binary is built from the release commit (`-ldflags "-s -w"`).
+> Shipped in **v0.5.1**. The bundled binary is built from the release commit (`-ldflags "-s -w"`).
 > **v0.3.1** fixed the shell-script shapes (**I-07** pwsh single-quoted literals, **I-08** PATH separator
 > follows the target shell) and stopped injecting a python `Scripts` directory that does not exist (**I-09**).
 > **v0.3.2 is a breaking change**: ployenv now reads a single project file, `.ployenv` -
