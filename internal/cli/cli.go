@@ -46,7 +46,7 @@ const helpTemplate = `ployenv - portable multi-runtime version manager
 
 usage: ployenv <command> [args]
 
-managed runtimes: node, java, go, python (aliases: nodejs / jdk / golang / py)
+managed runtimes: node, java, go, python, maven (aliases: nodejs / jdk / golang / py / mvn)
 
 inspect:
   ployenv support                     list the runtimes ployenv can manage
