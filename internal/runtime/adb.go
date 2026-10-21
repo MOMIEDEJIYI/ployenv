@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/logx"
 	"github.com/MOMIEDEJIYI/ployenv/internal/netx"
@@ -134,9 +135,36 @@ func adbIndexBases() []string {
 	return downloadBases("adb", androidRepository, androidMirrors...)
 }
 
+// adbIndexCache keeps the parsed index for one process. An install asks for the
+// index twice (resolve, then the checksum), which used to mean two downloads of
+// the same 423 KB document. The key is the base list, so a test that points the
+// repository somewhere else never reads a stale answer, and an error is never
+// cached (a transient failure must not poison the rest of the process).
+var (
+	adbIndexMu    sync.Mutex
+	adbIndexKey   string
+	adbIndexValue androidRepositoryIndex
+)
+
 func adbIndex() (androidRepositoryIndex, error) {
+	bases := adbIndexBases()
+	key := strings.Join(bases, "|")
+	adbIndexMu.Lock()
+	defer adbIndexMu.Unlock()
+	if adbIndexKey == key && adbIndexValue.RemotePackages != nil {
+		return adbIndexValue, nil
+	}
+	idx, err := fetchADBIndex(bases)
+	if err != nil {
+		return idx, err
+	}
+	adbIndexKey, adbIndexValue = key, idx
+	return idx, nil
+}
+
+func fetchADBIndex(bases []string) (androidRepositoryIndex, error) {
 	var lastErr error
-	for _, base := range adbIndexBases() {
+	for _, base := range bases {
 		txt, err := netx.GetTextRetry(strings.TrimRight(base, "/") + "/repository2-3.xml")
 		if err != nil {
 			lastErr = err

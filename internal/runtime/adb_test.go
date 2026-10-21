@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,5 +227,34 @@ func TestADBInjectsNoAndroidHome(t *testing.T) {
 	want := filepath.Join("C:", "data", "versions", "adb", "37.0.1")
 	if len(dirs) != 1 || dirs[0] != want {
 		t.Errorf("PathEntries = %v, want [%q]", dirs, want)
+	}
+}
+
+// An install asks for the index twice (version, then checksum). Fetching it twice
+// cost ~1 s per install of a 423 KB document, so the process keeps it; this test
+// pins the count rather than the mechanism.
+func TestADBIndexIsFetchedOncePerProcess(t *testing.T) {
+	fetches := 0
+	srv := server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repository2-3.xml" {
+			fetches++
+			io.WriteString(w, adbRepositoryXML)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	override(t, &androidRepository, srv.URL)
+	old := androidMirrors
+	androidMirrors = nil
+	t.Cleanup(func() { androidMirrors = old })
+
+	if _, err := adbList("latest"); err != nil {
+		t.Fatalf("adbList: %v", err)
+	}
+	if _, err := adbSpec.Plan("37.0.1"); err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if fetches != 1 {
+		t.Errorf("the index was fetched %d times, want 1 (one process, one download)", fetches)
 	}
 }
