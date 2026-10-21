@@ -32,6 +32,11 @@ on:
     branches: ["develop-v*", main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      runtime:
+        description: 'Run only this runtime row (blank = every row), e.g. adb'
+        required: false
+        default: ''
 
 jobs:
   gates:
@@ -679,6 +684,10 @@ jobs:
           fetch-depth: 0
       - name: read the runtime table
         id: read
+        env:
+          # workflow_dispatch can narrow the matrix to one row (e.g. a new
+          # runtime's acceptance run); blank means every row.
+          RUNTIME_FILTER: ${{ github.event.inputs.runtime }}
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
@@ -695,6 +704,14 @@ jobs:
           # One entry per platform. Runtime growth is free (one row); adding a
           # PLATFORM is the one-time cost here plus one step pair in e2e-runtime
           # (the shell differs), which is why the matrix carries shell/os.
+          want = os.environ.get("RUNTIME_FILTER", "").strip()
+          if want:
+              picked = [r for r in rows if r["name"] == want]
+              if not picked:
+                  print("::error::the runtime table has no row named " + want)
+                  raise SystemExit(1)
+              rows = picked
+
           platforms = [("ubuntu-latest", "bash", "linux"), ("windows-11-arm", "pwsh", "windows")]
 
           # A release point runs every row; otherwise only the rows whose
@@ -857,7 +874,9 @@ jobs:
     name: e2e every runtime in one shell (manual)
     # The parallel matrix gives every row its own data root; this lane is the
     # coexistence case (one root, one eval, every runtime active at once).
-    if: github.event_name == 'workflow_dispatch'
+    # A single-row dispatch (inputs.runtime set) skips it: that run is there to
+    # accept one runtime, not to re-prove they coexist.
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.runtime == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
