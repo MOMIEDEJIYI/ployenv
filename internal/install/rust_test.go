@@ -84,30 +84,32 @@ func rustSource(t *testing.T, tamperCargo bool) string {
 	work := t.TempDir()
 	manifest := fmt.Sprintf("manifest-version = \"2\"\ndate = \"2026-10-13\"\n\n[pkg.rustc]\nversion = \"%s (58cf8f9c3 2026-10-13)\"\n", rustTestVersion)
 
+	// The real archives nest the payload one level below the wrapper:
+	// <component>-<version>-<triple>/<component>/bin/..., with rust-installer's
+	// metadata beside it. A fixture that skips that level would pass a layout
+	// that cannot install the real thing (2026-10-21 review).
 	bodies := map[string]map[string]string{
 		"rustc": {
-			"bin/rustc" + exe:           "rustc\n",
-			"bin/rustdoc" + exe:         "rustdoc\n",
-			"lib/rustlib/components":    "components\n",
-			"install.sh":                "#!/bin/sh\n",
-			"components":                "rustc\n",
-			"manifest.in":               "manifest\n",
-			"rust-installer-version":    "3\n",
-			"version":                   "1.99.1\n",
-			"share/doc/rust/html/index": "docs\n",
+			"rustc/bin/rustc" + exe:           "rustc\n",
+			"rustc/bin/rustdoc" + exe:         "rustdoc\n",
+			"rustc/lib/rustlib/components":    "components\n",
+			"rustc/share/doc/rust/html/index": "docs\n",
+			"install.sh":                      "#!/bin/sh\n",
+			"components":                      "rustc\n",
+			"rust-installer-version":          "3\n",
+			"version":                         "1.99.1\n",
 		},
 		"cargo": {
-			"bin/cargo" + exe:        "cargo\n",
+			"cargo/bin/cargo" + exe:  "cargo\n",
+			"cargo/manifest.in":      "manifest\n",
 			"install.sh":             "#!/bin/sh\n",
 			"components":             "cargo\n",
-			"manifest.in":            "manifest\n",
 			"rust-installer-version": "3\n",
 		},
 		"rust-std": {
-			"lib/rustlib/" + triple + "/lib/libstd.rlib": "rlib\n",
+			"rust-std-" + triple + "/lib/rustlib/" + triple + "/lib/libstd.rlib": "rlib\n",
 			"install.sh":             "#!/bin/sh\n",
 			"components":             "rust-std\n",
-			"manifest.in":            "manifest\n",
 			"rust-installer-version": "3\n",
 		},
 	}
@@ -190,7 +192,7 @@ func TestEnsureMergesTheRustComponents(t *testing.T) {
 			}
 		}
 	}
-	for _, meta := range []string{"install.sh", "components", "manifest.in", "rust-installer-version", "version"} {
+	for _, meta := range []string{"install.sh", "components", "manifest.in", "rust-installer-version", "version", "cargo"} {
 		if fsutil.FileExists(filepath.Join(dir, meta)) {
 			t.Errorf("installer metadata %q must not survive", meta)
 		}

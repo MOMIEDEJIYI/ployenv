@@ -189,3 +189,30 @@ func TestRustToolPathsLiveUnderBin(t *testing.T) {
 		t.Errorf("Lookup(rustlang) = %v, want the rust spec", got)
 	}
 }
+
+// The dated directory holds the release the channel points at today. An older
+// version lives under its own date, which this manifest does not name, so
+// guessing it would only add a 404 to every download attempt.
+func TestRustPlanUsesDatedBasesOnlyForTheChannelVersion(t *testing.T) {
+	rustDistServer(t, nil)
+	withOS(t, "windows")
+	withArch(t, "amd64")
+
+	current, err := rustSpec.Plan("1.99.1")
+	if err != nil {
+		t.Fatalf("Plan(current): %v", err)
+	}
+	if !strings.HasSuffix(current.Bases[len(current.Bases)-1], "/2026-10-13") {
+		t.Errorf("current version bases = %v, want the dated fallback last", current.Bases)
+	}
+
+	older, err := rustSpec.Plan("1.98.0")
+	if err != nil {
+		t.Fatalf("Plan(older): %v", err)
+	}
+	for _, b := range older.Bases {
+		if strings.HasSuffix(b, "/2026-10-13") {
+			t.Errorf("an older version must not use today's dated directory: %v", older.Bases)
+		}
+	}
+}

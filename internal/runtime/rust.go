@@ -147,20 +147,26 @@ func rustList(filter string) ([]Release, error) {
 }
 
 // rustBases orders the download roots: a configured mirror, the official root,
-// then the dated directory that carries the same archives.
-func rustBases(ch rustChannel) []string {
-	bases := downloadBases("rust", rustDist, rustMirrors...)
-	if ch.Date != "" {
-		dated := strings.TrimRight(rustDist, "/") + "/" + ch.Date
-		dup := false
-		for _, b := range bases {
-			if strings.TrimRight(b, "/") == dated {
-				dup = true
-				break
+// then the dated directories that carry the same archives. The dated form is
+// only a fallback for the release the channel currently points at: an older
+// version lives under its own date, which today's manifest does not name, so
+// guessing it would only produce a 404.
+func rustBases(ch rustChannel, exact string) []string {
+	flat := downloadBases("rust", rustDist, rustMirrors...)
+	bases := append([]string{}, flat...)
+	if ch.Date != "" && exact == ch.Version {
+		for _, b := range flat {
+			dated := strings.TrimRight(b, "/") + "/" + ch.Date
+			dup := false
+			for _, have := range bases {
+				if strings.TrimRight(have, "/") == dated {
+					dup = true
+					break
+				}
 			}
-		}
-		if !dup {
-			bases = append(bases, dated)
+			if !dup {
+				bases = append(bases, dated)
+			}
 		}
 	}
 	return bases
@@ -209,8 +215,8 @@ func rustPlan(ver string) (Plan, error) {
 		return Plan{}, fmt.Errorf("Rust publishes no distribution for %s/%s", hostOS(), hostArch())
 	}
 	// A manifest that cannot be reached still allows an explicit version; only
-	// the dated fallback base is lost.
-	bases := rustBases(rustChannel{Date: ch.Date})
+	// the dated fallback bases are lost.
+	bases := rustBases(ch, exact)
 
 	parts := make([]Part, 0, len(rustComponents))
 	for _, comp := range rustComponents {

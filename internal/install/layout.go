@@ -83,13 +83,37 @@ func flattenNuGet(dest string) error {
 }
 
 // rustComponentPrefixes are the top-level directories a Rust distribution
-// unpacks into. Each carries its own bin/ and share/, so merging (not
-// flattening) is what puts rustc, cargo and rust-std in one tree.
+// unpacks into: <component>-<version>-<triple>/.
 var rustComponentPrefixes = []string{"rustc-", "cargo-", "rust-std-"}
 
-// rustInstallerFiles are rust-installer's metadata: they describe how to install
-// a component and mean nothing once its files are in place.
-var rustInstallerFiles = []string{"install.sh", "components", "manifest.in", "rust-installer-version", "version"}
+// rustPayloadDir finds the directory that actually carries the component's
+// files. rust-installer nests the payload one level deeper than the wrapper -
+// <component>-<version>-<triple>/<component>/bin/... - and puts its own metadata
+// (install.sh, components, version, the licences) beside it, so merging the
+// wrapper would leave a bin/ that does not exist and every install would fail
+// its "primary tool" check. Everything outside the payload is dropped with the
+// wrapper.
+func rustPayloadDir(top, component string) (string, error) {
+	entries, err := os.ReadDir(top)
+	if err != nil {
+		return "", err
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	if len(dirs) == 1 {
+		return filepath.Join(top, dirs[0]), nil
+	}
+	for _, d := range dirs {
+		if strings.HasPrefix(d, component) {
+			return filepath.Join(top, d), nil
+		}
+	}
+	return "", fmt.Errorf("%s: expected one payload directory, found %v", filepath.Base(top), dirs)
+}
 
 func flattenRust(dest string) error {
 	entries, err := os.ReadDir(dest)
@@ -101,30 +125,36 @@ func flattenRust(dest string) error {
 		if !e.IsDir() {
 			continue
 		}
-		matched := false
+		component := ""
 		for _, prefix := range rustComponentPrefixes {
 			if strings.HasPrefix(e.Name(), prefix) {
-				matched = true
+				component = strings.TrimSuffix(prefix, "-")
 				break
 			}
 		}
-		if !matched {
+		if component == "" {
 			continue
 		}
-		dir := filepath.Join(dest, e.Name())
-		for _, drop := range rustInstallerFiles {
-			_ = os.Remove(filepath.Join(dir, drop))
-		}
-		if err := fsutil.MergeDirInto(dir, dest); err != nil {
+		top := filepath.Join(dest, e.Name())
+		payload, err := rustPayloadDir(top, component)
+		if err != nil {
 			return err
 		}
-		if err := os.RemoveAll(dir); err != nil {
+		if err := fsutil.MergeDirInto(payload, dest); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(top); err != nil {
 			return err
 		}
 		merged++
 	}
 	if merged == 0 {
 		return fmt.Errorf("no Rust component directory (rustc-/cargo-/rust-std-) after extraction")
+	}
+	// Some of rust-installer's metadata sits inside the payload (cargo carries
+	// its own manifest.in), so it arrives with the merge and is dropped here.
+	for _, drop := range []string{"install.sh", "components", "manifest.in", "rust-installer-version", "version"} {
+		_ = os.Remove(filepath.Join(dest, drop))
 	}
 	return nil
 }
