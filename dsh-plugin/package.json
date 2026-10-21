@@ -47,7 +47,9 @@
     "java",
     "maven",
     "adb",
-    "platform-tools"
+    "platform-tools",
+    "rust",
+    "rustlang"
   ],
   "author": "MOMIEDEJIYI",
   "publishConfig": {

@@ -30,6 +30,7 @@ ployenv manages **language runtimes**. A runtime is identified by a short name:
 | `python` | `py`, `cpython` | `python`, `python3`, `pip`, `pip3` |
 | `maven` | `mvn` | `mvn`, `mvnDebug` |
 | `adb` | `platform-tools` | `adb`, `fastboot` |
+| `rust` | `rustlang` | `rustc`, `rustdoc`, `cargo` |
 
 Every runtime is installed into its own directory under
 `<data dir>/versions/<name>/<version>/`. ployenv never installs anything
@@ -49,6 +50,17 @@ it). Installs verify the archive against the SHA-1 the SDK repository publishes;
 a version the index no longer carries installs with a warning. The installer
 reads `source.properties` instead of running adb, so installing does not create
 `~/.android`; the first real `adb` run does.
+
+**Rust is a toolchain, not one binary.** ployenv installs `rustc`, `cargo` and
+`rust-std` from the official distribution — about 187 MB, assembled from the
+three component archives instead of the 400 MB bundle that also carries the
+documentation — and puts only `<ver>/bin` on `PATH`. `RUSTUP_HOME` and
+`CARGO_HOME` are never set, and `cargo` creates `~/.cargo` on first use, just as
+adb creates `~/.android`. Windows builds target MSVC: linking a program needs the
+Visual Studio Build Tools, while installing and `rustc --version` do not.
+Explicit versions install without the version index; the `latest` / `stable`
+channel reads the official manifest. A mirror helps where the CDN is slow:
+`ployenv config --set-mirror rust https://mirrors.ustc.edu.cn/rust-static/dist`.
 
 A version specifier is one of:
 
@@ -195,6 +207,9 @@ For `maven` the script only prepends `<ver>/bin` to `PATH`; no `MAVEN_HOME`,
 For `adb` the script only prepends `<ver>` (the flat platform-tools layout) to
 `PATH`; no `ANDROID_HOME` or `ANDROID_SDK_ROOT` is involved.
 
+For `rust` the script prepends `<ver>/bin` to `PATH`; no `RUSTUP_HOME` or
+`CARGO_HOME` is involved.
+
 Examples:
 
 ```powershell
@@ -323,11 +338,13 @@ Layouts:
 | `python` | Windows: a NuGet flat-container base. Otherwise a GitHub-release mirror, `<base>/<tag>/<file>`. |
 | `maven` | A **repository-shaped** base (same layout as Central), `<base>/<version>/apache-maven-<version>-bin.<ext>`. Apache distribution mirrors (dlcdn, TUNA, Aliyun, USTC) carry the archives but not `maven-metadata.xml`: listing tries the configured base once and then Central, while downloads follow the mirror-first order. |
 | `adb` | A Google SDK repository mirror: `<base>/repository2-3.xml` plus the `platform-tools_r<version>-<win\|darwin\|linux>.zip` archives it names. Tencent's `https://mirrors.cloud.tencent.com/AndroidSDK` carries the same bytes. |
+| `rust` | A flat dist mirror: `<base>/<comp>-<version>-<triple>.tar.gz` for `rustc`, `cargo` and `rust-std`. USTC (`https://mirrors.ustc.edu.cn/rust-static/dist`) carries the `.tar.gz` files; xz-only mirrors cannot be used. |
 
 ```powershell
 ployenv config --set-mirror node https://registry.npmmirror.com/-/binary/node
 ployenv config --set-mirror java https://mirrors.tuna.tsinghua.edu.cn/Adoptium
 ployenv config --set-mirror java none        # back to the official source
+ployenv config --set-mirror rust https://mirrors.ustc.edu.cn/rust-static/dist
 ```
 
 ## Scripting and encoding

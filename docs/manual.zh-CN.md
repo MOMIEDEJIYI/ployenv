@@ -29,6 +29,7 @@ ployenv 管理的是**语言运行时**，用短名称标识：
 | `python` | `py`、`cpython` | `python`、`python3`、`pip`、`pip3` |
 | `maven` | `mvn` | `mvn`、`mvnDebug` |
 | `adb` | `platform-tools` | `adb`、`fastboot` |
+| `rust` | `rustlang` | `rustc`、`rustdoc`、`cargo` |
 
 每个运行时都装在 `<数据目录>/versions/<名称>/<版本>/` 下，各自独立。
 ployenv 从不做系统级安装，也从不改写不属于自己的文件。
@@ -45,6 +46,14 @@ SDK 组件，ployenv **从不设 `ANDROID_HOME`/`ANDROID_SDK_ROOT`**，也**不�
 索引里已不再携带的版本会在**告警后继续**。安装器读 `source.properties` 判断
 版本、**不执行 adb**，所以安装过程不会创建 `~/.android`；第一次真正运行 `adb`
 时才创建。
+
+**Rust 是工具链，不是一个二进制。** ployenv 从官方分发安装 `rustc`、`cargo` 与
+`rust-std`（约 **187 MB**，由三个组件归档组合，而不是含文档的 400 MB 整包），
+并且只把 `<版本>/bin` 加入 `PATH`；**不设 `RUSTUP_HOME`/`CARGO_HOME`**，
+`cargo` 首次使用会自建 `~/.cargo`（与 adb 建 `~/.android` 同理）。Windows 走 MSVC，
+**链接程序**需要 VS Build Tools，仅安装与 `rustc --version` 不需要。
+显式版本**不依赖版本索引**即可安装；`latest`/`stable` 通道才读官方 manifest。
+网络慢时可用镜像：`ployenv config --set-mirror rust https://mirrors.ustc.edu.cn/rust-static/dist`。
 
 版本写法有三种：
 
@@ -176,6 +185,9 @@ flag 会被**拒绝**而不是忽略 —— 因此 `--project` 再也不会被�
 对 `adb` 来说，脚本只在 `PATH` 前插入 `<版本>`（platform-tools 是平铺布局），
 不涉及 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`。
 
+对 `rust` 来说，脚本只在 `PATH` 前插入 `<版本>/bin`，不涉及
+`RUSTUP_HOME` 或 `CARGO_HOME`。
+
 示例：
 
 ```powershell
@@ -293,11 +305,13 @@ ployenv config --set-default node none       # 取消它（也可写 off / defau
 | `python` | Windows：NuGet flat-container 基址。其他平台：GitHub Release 镜像，`<基址>/<tag>/<文件>`。 |
 | `maven` | **仓库形态**的基址（与 Central 同布局），`<基址>/<版本>/apache-maven-<版本>-bin.<ext>`。Apache 分发镜像（dlcdn、TUNA、阿里云、USTC）有安装包但**没有 `maven-metadata.xml`**：列版本时先试配置的基址一次、再走 Central；下载仍按"镜像优先"顺序。 |
 | `adb` | Google SDK 仓库形态的镜像：`<基址>/repository2-3.xml` 加它声明的 `platform-tools_r<版本>-<win\|darwin\|linux>.zip`。腾讯 `https://mirrors.cloud.tencent.com/AndroidSDK` 同字节。 |
+| `rust` | 平铺 dist 镜像：`<基址>/<组件>-<版本>-<triple>.tar.gz`（rustc / cargo / rust-std）。USTC（`https://mirrors.ustc.edu.cn/rust-static/dist`）有 `.tar.gz`；只有 xz 的镜像不可用。 |
 
 ```powershell
 ployenv config --set-mirror node https://registry.npmmirror.com/-/binary/node
 ployenv config --set-mirror java https://mirrors.tuna.tsinghua.edu.cn/Adoptium
 ployenv config --set-mirror java none        # 恢复官方源
+ployenv config --set-mirror rust https://mirrors.ustc.edu.cn/rust-static/dist
 ```
 
 ## 脚本与编码

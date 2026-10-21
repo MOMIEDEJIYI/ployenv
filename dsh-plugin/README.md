@@ -1,7 +1,7 @@
 # dsh-plugin-ployenv
 
 DeepSeek Harness (DSH) host plugin that drives [ployenv](../README.md) - the local runtime version
-manager for node, java, go, python, maven and adb (Android platform-tools) - from the chat. The plugin passes the runtime family
+manager for node, java, go, python, maven, adb (Android platform-tools) and rust - from the chat. The plugin passes the runtime family
 straight through to the CLI, so a new family lights up here as soon as the CLI supports it.
 
 It contributes:
@@ -182,6 +182,7 @@ version:   ["--version"]
 /ployenv uninstall node@20.11.1           uninstall
 /ployenv install maven@3.9.9             any runtime family works the same way (maven included)
 /ployenv install adb@latest              Android platform-tools (adb + fastboot)
+/ployenv install rust@latest             Rust toolchain (rustc + cargo, ~187 MB)
 /ployenv use node@22.11.0                 set the global default
 /ployenv use node@22.11.0 --project       pin the current project (.ployenv)
 /ployenv current node                     effective version and its source

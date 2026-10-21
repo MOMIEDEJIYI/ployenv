@@ -5,8 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A portable, single-binary version manager for local runtimes —
-**Node.js, Java, Go, Python, Maven and adb (Android platform-tools)** — with
-nothing to install and nothing to configure.
+**Node.js, Java, Go, Python, Maven, adb (Android platform-tools) and Rust** —
+with nothing to install and nothing to configure.
 
 No installer, no account, no licence checks, and **no changes to your system
 environment**. Drop one executable anywhere; its runtimes and settings live next
