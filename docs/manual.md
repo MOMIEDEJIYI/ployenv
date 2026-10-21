@@ -86,22 +86,22 @@ proceeds automatically.
 The `dsh-plugin-ployenv` plugin ships its own ployenv copy and keeps its data inside
 the plugin package (`<package>/data/ployenv`), so uninstalling or upgrading the plugin
 also removes the runtimes installed there. If you already installed ployenv yourself
-(for example under `E:\PloyEnv`), you can make the plugin and your shell **share one
+(for example under `C:\ployenv`), you can make the plugin and your shell **share one
 binary and one data root**:
 
 1. Set a **user** environment variable so the plugin uses your binary:
 
    ```text
-   PLOYENV_BIN = E:\PloyEnv\ployenv.exe
+   PLOYENV_BIN = C:\ployenv\ployenv.exe
    ```
 
 2. Keep the data root in the same place (either is enough):
 
    - **leave** `PLOYENV_ROOT` unset: the CLI defaults to the executable's own directory
-     (here `E:\PloyEnv`);
-   - or set `PLOYENV_ROOT = E:\PloyEnv` explicitly.
+     (here `C:\ployenv`);
+   - or set `PLOYENV_ROOT = C:\ployenv` explicitly.
 
-3. To run `ployenv` from a shell too (optional), add `E:\PloyEnv` to the user `PATH`.
+3. To run `ployenv` from a shell too (optional), add `C:\ployenv` to the user `PATH`.
 
 4. **Quit DSH completely and reopen it** (the environment is read at process start;
    only programs started afterwards see a new variable).
@@ -109,13 +109,13 @@ binary and one data root**:
 5. Verify with `/ployenv status` inside DSH:
 
    ```text
-   bin:        E:\PloyEnv\ployenv.exe
+   bin:        C:\ployenv\ployenv.exe
    bin source: PLOYENV_BIN
-   root:       E:\PloyEnv
+   root:       C:\ployenv
    ```
 
 From then on the shell and DSH share the same runtimes, and **uninstalling or upgrading
-the plugin never touches the data under `E:\PloyEnv`**.
+the plugin never touches the data under `C:\ployenv`**.
 
 > To go back to the plugin's own copy, delete `PLOYENV_BIN` (and `PLOYENV_ROOT`) and
 > restart DSH. Resolution order - binary: row `bin` > `PLOYENV_BIN` >
