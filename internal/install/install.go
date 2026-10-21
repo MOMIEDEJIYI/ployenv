@@ -79,6 +79,17 @@ func Ensure(spec *runtime.Spec, request string, opts Options) (version string, a
 		}
 	}
 
+	if plan.SHA1 != "" {
+		sum, err := sha1File(cachePath)
+		if err != nil {
+			return "", false, err
+		}
+		if !strings.EqualFold(sum, plan.SHA1) {
+			_ = os.Remove(cachePath)
+			return "", false, fmt.Errorf("%s@%s SHA-1 mismatch (expected %s, got %s)", spec.Name, plan.Exact, plan.SHA1, sum)
+		}
+	}
+
 	if plan.SHA512 != "" {
 		sum, err := sha512File(cachePath)
 		if err != nil {

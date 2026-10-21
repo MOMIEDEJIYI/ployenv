@@ -2,7 +2,7 @@ package runtime
 
 import "strings"
 
-var all = []*Spec{nodeSpec, javaSpec, goSpec, pythonSpec, mavenSpec}
+var all = []*Spec{nodeSpec, javaSpec, goSpec, pythonSpec, mavenSpec, adbSpec}
 
 var byName = map[string]*Spec{}
 
