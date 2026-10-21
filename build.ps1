@@ -43,6 +43,9 @@ Set-Location -LiteralPath $PSScriptRoot
 # which may be the caller's. Everything is resolved against an absolute path here.
 if (-not [System.IO.Path]::IsPathRooted($Out)) { $Out = Join-Path $PSScriptRoot $Out }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
+# GOCACHE is the one environment variable this script sets and deliberately does NOT
+# restore: it is an ignored build cache, reusing it across a same-session `go test`
+# only saves work, and putting it back would force that test to rebuild everything.
 if (-not $env:GOCACHE) { $env:GOCACHE = Join-Path $PSScriptRoot '.gocache' }
 
 foreach ($tool in 'go', 'gofmt') {
