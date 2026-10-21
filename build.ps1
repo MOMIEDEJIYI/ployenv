@@ -9,6 +9,25 @@
 param([string]$Out = 'dist', [switch]$Test, [switch]$Package, [string]$Version = '',
     [string]$TargetOS = '', [string]$TargetArch = '')
 $ErrorActionPreference = 'Stop'
+# A same-session caller keeps its own build environment. GOOS/GOARCH/CGO_ENABLED are
+# set below for cross builds, and leaving them behind turns a later `go test` or
+# `go build` in that shell into a cross-compile whose binaries the host cannot run
+# ("%1 is not a valid Win32 application"): every package then fails in milliseconds,
+# which hides real failures. Save them here and put them back on every exit path.
+$savedBuildEnv = @{}
+foreach ($name in 'GOOS', 'GOARCH', 'CGO_ENABLED') {
+    $savedBuildEnv[$name] = [Environment]::GetEnvironmentVariable($name)
+}
+function Restore-BuildEnv {
+    foreach ($name in $savedBuildEnv.Keys) {
+        if ($null -eq $savedBuildEnv[$name]) {
+            Remove-Item -LiteralPath ('Env:\' + $name) -ErrorAction SilentlyContinue
+        } else {
+            Set-Item -LiteralPath ('Env:\' + $name) -Value $savedBuildEnv[$name]
+        }
+    }
+}
+try {
 # The published targets (REQ-008 FR-802 / 3.1). Go's words on purpose: `amd64`, not `x64`.
 $PublishedTargets = @('windows-amd64', 'windows-arm64', 'linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64')
 # -Package lays out all six unless the caller asked for one specific target.
@@ -236,4 +255,7 @@ if ($Package) {
     Write-Host ''
     Write-Host ("release assets in {0}  (targets: {1})" -f $relDir, ($targets -join ', '))
     Get-ChildItem -LiteralPath $relDir | Select-Object Name, Length | Format-Table -AutoSize
+}
+} finally {
+    Restore-BuildEnv
 }
