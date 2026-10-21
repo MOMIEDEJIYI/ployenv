@@ -131,6 +131,12 @@ func rustList(filter string) ([]Release, error) {
 	case "lts":
 		return nil, fmt.Errorf("rust has no LTS channel; use latest or an explicit version")
 	}
+	// An exact version needs no index: every release sits at the same flat path,
+	// so asking the manifest about it would only make an offline install (and a
+	// unit test) depend on the network for nothing.
+	if version.IsExact(f) {
+		return []Release{{Version: strings.TrimPrefix(f, "v")}}, nil
+	}
 	ch, err := rustChannelInfo()
 	if err != nil {
 		return nil, err
@@ -203,10 +209,12 @@ func isHexString(s string) bool {
 
 func rustPlan(ver string) (Plan, error) {
 	exact := strings.TrimPrefix(strings.TrimSpace(ver), "v")
-	ch, chErr := rustChannelInfo()
+	ch := rustChannel{}
 	if exact == "" || version.IsChannel(exact) {
-		if chErr != nil {
-			return Plan{}, chErr
+		var err error
+		ch, err = rustChannelInfo()
+		if err != nil {
+			return Plan{}, err
 		}
 		exact = ch.Version
 	}
@@ -214,8 +222,9 @@ func rustPlan(ver string) (Plan, error) {
 	if triple == "" {
 		return Plan{}, fmt.Errorf("Rust publishes no distribution for %s/%s", hostOS(), hostArch())
 	}
-	// A manifest that cannot be reached still allows an explicit version; only
-	// the dated fallback bases are lost.
+	// An explicit version skips the manifest entirely, so an offline install and
+	// a unit test never touch the network; the dated fallback is only known for
+	// the channel version, which is why rustBases receives ch.
 	bases := rustBases(ch, exact)
 
 	parts := make([]Part, 0, len(rustComponents))

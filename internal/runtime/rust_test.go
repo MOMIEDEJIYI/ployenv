@@ -150,11 +150,7 @@ func TestRustPlanFetchesThreeComponentsWithTheirSidecars(t *testing.T) {
 			t.Errorf("URLFor = %q", got)
 		}
 	}
-	// The dated directory is a fallback root for the same archives.
-	last := plan.Bases[len(plan.Bases)-1]
-	if !strings.HasSuffix(last, "/2026-10-13") {
-		t.Errorf("last base = %q, want the dated directory", last)
-	}
+
 }
 
 func TestRustPlanRejectsAnUnknownArchitecture(t *testing.T) {
@@ -190,29 +186,58 @@ func TestRustToolPathsLiveUnderBin(t *testing.T) {
 	}
 }
 
-// The dated directory holds the release the channel points at today. An older
-// version lives under its own date, which this manifest does not name, so
-// guessing it would only add a 404 to every download attempt.
-func TestRustPlanUsesDatedBasesOnlyForTheChannelVersion(t *testing.T) {
+// The dated directory holds the release the channel points at today, so it is a
+// fallback for a channel request only. An explicit version is resolved without
+// the manifest (it must work offline), and its own date is not in today's
+// manifest to guess.
+func TestRustPlanUsesDatedBasesOnlyWhenItResolvesAChannel(t *testing.T) {
 	rustDistServer(t, nil)
 	withOS(t, "windows")
 	withArch(t, "amd64")
 
-	current, err := rustSpec.Plan("1.99.1")
+	channel, err := rustSpec.Plan("latest")
 	if err != nil {
-		t.Fatalf("Plan(current): %v", err)
+		t.Fatalf("Plan(latest): %v", err)
 	}
-	if !strings.HasSuffix(current.Bases[len(current.Bases)-1], "/2026-10-13") {
-		t.Errorf("current version bases = %v, want the dated fallback last", current.Bases)
+	if channel.Exact != "1.99.1" {
+		t.Fatalf("Plan(latest).Exact = %q, want 1.99.1", channel.Exact)
+	}
+	if !strings.HasSuffix(channel.Bases[len(channel.Bases)-1], "/2026-10-13") {
+		t.Errorf("channel bases = %v, want the dated fallback last", channel.Bases)
 	}
 
-	older, err := rustSpec.Plan("1.98.0")
+	explicit, err := rustSpec.Plan("1.98.0")
 	if err != nil {
-		t.Fatalf("Plan(older): %v", err)
+		t.Fatalf("Plan(1.98.0): %v", err)
 	}
-	for _, b := range older.Bases {
+	for _, b := range explicit.Bases {
 		if strings.HasSuffix(b, "/2026-10-13") {
-			t.Errorf("an older version must not use today's dated directory: %v", older.Bases)
+			t.Errorf("an explicit version must not use today's dated directory: %v", explicit.Bases)
 		}
+	}
+}
+
+// An explicit version must not need the index at all: the manifest route is
+// missing here on purpose, and both calls still have to succeed.
+func TestRustExplicitVersionNeedsNoIndex(t *testing.T) {
+	srv := staticServer(t, map[string]string{})
+	override(t, &rustDist, srv.URL)
+	old := rustMirrors
+	rustMirrors = nil
+	t.Cleanup(func() { rustMirrors = old })
+
+	rels, err := rustList("1.98.0")
+	if err != nil {
+		t.Fatalf("rustList(1.98.0) must not need the manifest: %v", err)
+	}
+	if len(rels) != 1 || rels[0].Version != "1.98.0" {
+		t.Fatalf("rustList(1.98.0) = %v, want the requested version", rels)
+	}
+	plan, err := rustSpec.Plan("1.98.0")
+	if err != nil {
+		t.Fatalf("Plan(1.98.0) must not need the manifest: %v", err)
+	}
+	if len(plan.Parts) != 3 || plan.Exact != "1.98.0" {
+		t.Fatalf("Plan(1.98.0) = %+v, want three parts for that version", plan)
 	}
 }
