@@ -28,6 +28,7 @@ ployenv 管理的是**语言运行时**，用短名称标识：
 | `go` | `golang` | `go`、`gofmt` |
 | `python` | `py`、`cpython` | `python`、`python3`、`pip`、`pip3` |
 | `maven` | `mvn` | `mvn`、`mvnDebug` |
+| `adb` | `platform-tools` | `adb`、`fastboot` |
 
 每个运行时都装在 `<数据目录>/versions/<名称>/<版本>/` 下，各自独立。
 ployenv 从不做系统级安装，也从不改写不属于自己的文件。
@@ -36,6 +37,14 @@ ployenv 从不做系统级安装，也从不改写不属于自己的文件。
 `MAVEN_HOME`/`M2_HOME`**（`mvn.cmd` 自己推导主目录），也**不碰 `settings.xml`
 或 `~/.m2`**。Maven 需要一个 JDK：用 ployenv 装的 `java`，或继续用你自己的
 `JAVA_HOME`，两种都可以；两者都不可用时，`ployenv doctor` 会在 stderr 给一行提示。
+
+**adb 也是工具，不是语言。** 它管理 Android platform-tools（`adb` 与 `fastboot`
+所在地）。激活某个版本只把该版本的目录加入 `PATH` —— platform-tools 是独立的
+SDK 组件，ployenv **从不设 `ANDROID_HOME`/`ANDROID_SDK_ROOT`**，也**不碰
+`~/.android`**（那是 adb 自己的目录）。安装时按 SDK 仓库公布的 **SHA-1** 校验；
+索引里已不再携带的版本会在**告警后继续**。安装器读 `source.properties` 判断
+版本、**不执行 adb**，所以安装过程不会创建 `~/.android`；第一次真正运行 `adb`
+时才创建。
 
 版本写法有三种：
 
@@ -164,6 +173,9 @@ flag 会被**拒绝**而不是忽略 —— 因此 `--project` 再也不会被�
 对 `maven` 来说，脚本只在 `PATH` 前插入 `<版本>/bin`，不涉及 `MAVEN_HOME`、
 `M2_HOME` 或任何 Maven 配置。
 
+对 `adb` 来说，脚本只在 `PATH` 前插入 `<版本>`（platform-tools 是平铺布局），
+不涉及 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`。
+
 示例：
 
 ```powershell
@@ -280,6 +292,7 @@ ployenv config --set-default node none       # 取消它（也可写 off / defau
 | `java` | Adoptium 风格的镜像，`<基址>/<主版本>/jdk/<arch>/<os>/<文件>`。 |
 | `python` | Windows：NuGet flat-container 基址。其他平台：GitHub Release 镜像，`<基址>/<tag>/<文件>`。 |
 | `maven` | **仓库形态**的基址（与 Central 同布局），`<基址>/<版本>/apache-maven-<版本>-bin.<ext>`。Apache 分发镜像（dlcdn、TUNA、阿里云、USTC）有安装包但**没有 `maven-metadata.xml`**：列版本时先试配置的基址一次、再走 Central；下载仍按"镜像优先"顺序。 |
+| `adb` | Google SDK 仓库形态的镜像：`<基址>/repository2-3.xml` 加它声明的 `platform-tools_r<版本>-<win\|darwin\|linux>.zip`。腾讯 `https://mirrors.cloud.tencent.com/AndroidSDK` 同字节。 |
 
 ```powershell
 ployenv config --set-mirror node https://registry.npmmirror.com/-/binary/node

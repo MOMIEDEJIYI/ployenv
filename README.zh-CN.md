@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **绿色单文件**的本地运行时版本管理器 —— 一套命令搞定
-**Node.js / Java / Go / Python / Maven** 的下载、安装、查看与切换。
+**Node.js / Java / Go / Python / Maven / adb（Android platform-tools）** 的下载、安装、查看与切换。
 
 不用装安装程序、不用账号、不做许可校验、不用登录，**也不改你的系统环境**。
 一个可执行文件放到哪，运行时和配置就存在哪。

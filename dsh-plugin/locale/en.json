@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "ployenv",
-    "description": "Local runtime version manager: install, pin and switch Node.js, Java, Go, Python and Maven, then activate the chosen versions in session shells."
+    "description": "Local runtime version manager: install, pin and switch Node.js, Java, Go, Python, Maven and adb (Android platform-tools), then activate the chosen versions in session shells."
   }
 }

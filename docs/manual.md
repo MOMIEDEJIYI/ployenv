@@ -29,6 +29,7 @@ ployenv manages **language runtimes**. A runtime is identified by a short name:
 | `go` | `golang` | `go`, `gofmt` |
 | `python` | `py`, `cpython` | `python`, `python3`, `pip`, `pip3` |
 | `maven` | `mvn` | `mvn`, `mvnDebug` |
+| `adb` | `platform-tools` | `adb`, `fastboot` |
 
 Every runtime is installed into its own directory under
 `<data dir>/versions/<name>/<version>/`. ployenv never installs anything
@@ -39,6 +40,15 @@ it does not set `MAVEN_HOME`/`M2_HOME` (`mvn.cmd` derives its own home) and it
 never touches `settings.xml` or `~/.m2`. Maven needs a JDK: either activate a
 ployenv-managed `java` or keep your own `JAVA_HOME` — both work. `ployenv doctor`
 prints a hint on stderr when neither is reachable.
+
+**adb is a tool too.** It manages Android platform-tools, the home of `adb` and
+`fastboot`. Activating a version only puts its own directory on `PATH`:
+platform-tools is a standalone SDK component, so ployenv never sets
+`ANDROID_HOME` or `ANDROID_SDK_ROOT` and never touches `~/.android` (adb owns
+it). Installs verify the archive against the SHA-1 the SDK repository publishes;
+a version the index no longer carries installs with a warning. The installer
+reads `source.properties` instead of running adb, so installing does not create
+`~/.android`; the first real `adb` run does.
 
 A version specifier is one of:
 
@@ -182,6 +192,9 @@ explicitly. A flag the command does not accept is refused rather than ignored, s
 For `maven` the script only prepends `<ver>/bin` to `PATH`; no `MAVEN_HOME`,
 `M2_HOME` or Maven configuration is involved.
 
+For `adb` the script only prepends `<ver>` (the flat platform-tools layout) to
+`PATH`; no `ANDROID_HOME` or `ANDROID_SDK_ROOT` is involved.
+
 Examples:
 
 ```powershell
@@ -309,6 +322,7 @@ Layouts:
 | `java` | An Adoptium-style mirror, `<base>/<feature>/jdk/<arch>/<os>/<file>`. |
 | `python` | Windows: a NuGet flat-container base. Otherwise a GitHub-release mirror, `<base>/<tag>/<file>`. |
 | `maven` | A **repository-shaped** base (same layout as Central), `<base>/<version>/apache-maven-<version>-bin.<ext>`. Apache distribution mirrors (dlcdn, TUNA, Aliyun, USTC) carry the archives but not `maven-metadata.xml`: listing tries the configured base once and then Central, while downloads follow the mirror-first order. |
+| `adb` | A Google SDK repository mirror: `<base>/repository2-3.xml` plus the `platform-tools_r<version>-<win\|darwin\|linux>.zip` archives it names. Tencent's `https://mirrors.cloud.tencent.com/AndroidSDK` carries the same bytes. |
 
 ```powershell
 ployenv config --set-mirror node https://registry.npmmirror.com/-/binary/node
