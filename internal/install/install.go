@@ -58,47 +58,26 @@ func Ensure(spec *runtime.Spec, request string, opts Options) (version string, a
 	if err := config.EnsureRoot(); err != nil {
 		return "", false, err
 	}
-	cachePath := filepath.Join(config.CacheDir(), plan.File)
-	if opts.Force || !fsutil.FileExists(cachePath) {
-		label := fmt.Sprintf("Downloading %s %s", spec.Name, plan.Exact)
-		if err := netx.Download(plan.Bases, plan.URLFor, cachePath, label); err != nil {
-			return "", false, err
-		}
-	} else {
-		logx.Verbosef("using the cached archive %s", cachePath)
-	}
 
-	if plan.SHA256 != "" {
-		sum, err := sha256File(cachePath)
-		if err != nil {
+	parts := planParts(plan)
+	caches := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cachePath := filepath.Join(config.CacheDir(), part.File)
+		if opts.Force || !fsutil.FileExists(cachePath) {
+			label := fmt.Sprintf("Downloading %s %s", spec.Name, plan.Exact)
+			if len(parts) > 1 {
+				label = fmt.Sprintf("Downloading %s %s (%s)", spec.Name, plan.Exact, part.File)
+			}
+			if err := netx.Download(plan.Bases, part.URLFor, cachePath, label); err != nil {
+				return "", false, err
+			}
+		} else {
+			logx.Verbosef("using the cached archive %s", cachePath)
+		}
+		if err := verifyArchive(spec, plan, part, cachePath); err != nil {
 			return "", false, err
 		}
-		if !strings.EqualFold(sum, plan.SHA256) {
-			_ = os.Remove(cachePath)
-			return "", false, fmt.Errorf("%s@%s checksum mismatch (expected %s, got %s)", spec.Name, plan.Exact, plan.SHA256, sum)
-		}
-	}
-
-	if plan.SHA1 != "" {
-		sum, err := sha1File(cachePath)
-		if err != nil {
-			return "", false, err
-		}
-		if !strings.EqualFold(sum, plan.SHA1) {
-			_ = os.Remove(cachePath)
-			return "", false, fmt.Errorf("%s@%s SHA-1 mismatch (expected %s, got %s)", spec.Name, plan.Exact, plan.SHA1, sum)
-		}
-	}
-
-	if plan.SHA512 != "" {
-		sum, err := sha512File(cachePath)
-		if err != nil {
-			return "", false, err
-		}
-		if !strings.EqualFold(sum, plan.SHA512) {
-			_ = os.Remove(cachePath)
-			return "", false, fmt.Errorf("%s@%s SHA-512 mismatch (expected %s, got %s)", spec.Name, plan.Exact, plan.SHA512, sum)
-		}
+		caches = append(caches, cachePath)
 	}
 
 	dest := config.VersionDir(spec.Name, plan.Exact)
@@ -109,9 +88,11 @@ func Ensure(spec *runtime.Spec, request string, opts Options) (version string, a
 		return "", false, err
 	}
 	logx.Stepf("Extracting %s %s", spec.Name, plan.Exact)
-	if err := archive.Extract(cachePath, dest); err != nil {
-		_ = os.RemoveAll(dest)
-		return "", false, err
+	for _, cachePath := range caches {
+		if err := archive.Extract(cachePath, dest); err != nil {
+			_ = os.RemoveAll(dest)
+			return "", false, err
+		}
 	}
 	if err := applyLayout(plan.Layout, dest); err != nil {
 		_ = os.RemoveAll(dest)
@@ -133,14 +114,77 @@ func Ensure(spec *runtime.Spec, request string, opts Options) (version string, a
 			logx.Verbosef("self-check reports %s", reported)
 		}
 	}
-	// The downloaded archive is a means, not a result: drop it unless the user
-	// asked to keep a cache (config cache.keep).
+	// The downloaded archives are a means, not a result: drop them unless the
+	// user asked to keep a cache (config cache.keep).
 	if !config.CacheKeep() {
-		if err := os.Remove(cachePath); err == nil {
-			logx.Verbosef("removed the cached archive %s", filepath.Base(cachePath))
+		for _, cachePath := range caches {
+			if err := os.Remove(cachePath); err == nil {
+				logx.Verbosef("removed the cached archive %s", filepath.Base(cachePath))
+			}
 		}
 	}
 	return plan.Exact, false, nil
+}
+
+// archivePart is one download of a plan, unified for single- and multi-archive
+// runtimes so the verification below has exactly one shape to handle.
+type archivePart struct {
+	File   string
+	URLFor func(base string) string
+	SHA256 string
+	SHA1   string
+	SHA512 string
+}
+
+// planParts expands a plan into the archives to fetch. A runtime that ships one
+// archive keeps its SHA-1/SHA-512 checks; a multi-archive runtime carries a
+// SHA-256 per part (what Rust publishes as a .sha256 sidecar).
+func planParts(plan runtime.Plan) []archivePart {
+	if len(plan.Parts) == 0 {
+		return []archivePart{{File: plan.File, URLFor: plan.URLFor, SHA256: plan.SHA256, SHA1: plan.SHA1, SHA512: plan.SHA512}}
+	}
+	out := make([]archivePart, 0, len(plan.Parts))
+	for _, p := range plan.Parts {
+		out = append(out, archivePart{File: p.File, URLFor: p.URLFor, SHA256: p.SHA256})
+	}
+	return out
+}
+
+// verifyArchive checks one downloaded archive, dropping it when it does not
+// match: an unverified file must never reach the extractor, and a bad one must
+// not survive in the cache.
+func verifyArchive(spec *runtime.Spec, plan runtime.Plan, part archivePart, cachePath string) error {
+	if part.SHA256 != "" {
+		sum, err := sha256File(cachePath)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(sum, part.SHA256) {
+			_ = os.Remove(cachePath)
+			return fmt.Errorf("%s@%s checksum mismatch (expected %s, got %s)", spec.Name, plan.Exact, part.SHA256, sum)
+		}
+	}
+	if part.SHA1 != "" {
+		sum, err := sha1File(cachePath)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(sum, part.SHA1) {
+			_ = os.Remove(cachePath)
+			return fmt.Errorf("%s@%s SHA-1 mismatch (expected %s, got %s)", spec.Name, plan.Exact, part.SHA1, sum)
+		}
+	}
+	if part.SHA512 != "" {
+		sum, err := sha512File(cachePath)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(sum, part.SHA512) {
+			_ = os.Remove(cachePath)
+			return fmt.Errorf("%s@%s SHA-512 mismatch (expected %s, got %s)", spec.Name, plan.Exact, part.SHA512, sum)
+		}
+	}
+	return nil
 }
 
 // assertExecutable enforces FR-808. On the Unix-likes a version directory whose

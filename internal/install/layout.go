@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/MOMIEDEJIYI/ployenv/internal/fsutil"
 	"github.com/MOMIEDEJIYI/ployenv/internal/platform"
@@ -25,6 +27,8 @@ func applyLayout(l runtime.Layout, dest string) error {
 		return flattenMacJDK(dest)
 	case runtime.LayoutNuGet:
 		return flattenNuGet(dest)
+	case runtime.LayoutRust:
+		return flattenRust(dest)
 	default:
 		return nil
 	}
@@ -74,6 +78,53 @@ func flattenNuGet(dest string) error {
 	}
 	for _, drop := range []string{"tools", "_rels", "package", "images", "python.nuspec", "[Content_Types].xml", ".signature.p7s"} {
 		_ = os.RemoveAll(filepath.Join(dest, drop))
+	}
+	return nil
+}
+
+// rustComponentPrefixes are the top-level directories a Rust distribution
+// unpacks into. Each carries its own bin/ and share/, so merging (not
+// flattening) is what puts rustc, cargo and rust-std in one tree.
+var rustComponentPrefixes = []string{"rustc-", "cargo-", "rust-std-"}
+
+// rustInstallerFiles are rust-installer's metadata: they describe how to install
+// a component and mean nothing once its files are in place.
+var rustInstallerFiles = []string{"install.sh", "components", "manifest.in", "rust-installer-version", "version"}
+
+func flattenRust(dest string) error {
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		return err
+	}
+	merged := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		matched := false
+		for _, prefix := range rustComponentPrefixes {
+			if strings.HasPrefix(e.Name(), prefix) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		dir := filepath.Join(dest, e.Name())
+		for _, drop := range rustInstallerFiles {
+			_ = os.Remove(filepath.Join(dir, drop))
+		}
+		if err := fsutil.MergeDirInto(dir, dest); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		merged++
+	}
+	if merged == 0 {
+		return fmt.Errorf("no Rust component directory (rustc-/cargo-/rust-std-) after extraction")
 	}
 	return nil
 }

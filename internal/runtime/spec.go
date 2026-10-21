@@ -33,7 +33,21 @@ const (
 	// nests the actual JDK home two levels deep, as <wrapper>/Contents/Home,
 	// so a plain flatten would leave Contents/ where bin/ is expected.
 	LayoutMacJDK
+	// LayoutRust merges the per-component directories of a Rust distribution
+	// (rustc-<ver>-<triple>/, cargo-<ver>-<triple>/, rust-std-<triple>/) into
+	// one version directory. Each component carries its own bin/ and share/, so
+	// this is a directory merge, not a flatten.
+	LayoutRust
 )
+
+// Part is one archive of a multi-archive runtime. Rust publishes rustc, cargo
+// and rust-std as separate tarballs, each with its own checksum sidecar, so a
+// single File on Plan cannot describe an install.
+type Part struct {
+	File   string
+	URLFor func(base string) string
+	SHA256 string // optional integrity check, read from the .sha256 sidecar
+}
 
 // Plan describes how to obtain one exact version.
 type Plan struct {
@@ -49,6 +63,10 @@ type Plan struct {
 	// SHA512 is the optional integrity check for upstreams that publish only a
 	// SHA-512 sidecar (Maven Central: .sha256 answers 404).
 	SHA512 string
+	// Parts describes a runtime that ships several archives. When it is set,
+	// install fetches and verifies every part and unpacks them all into the
+	// same version directory; Layout then runs once, on the merged tree.
+	Parts  []Part
 	Layout Layout
 }
 

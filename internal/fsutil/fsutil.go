@@ -109,6 +109,46 @@ func MoveEntries(from, to string) error {
 	return nil
 }
 
+// MergeDirInto moves every entry of from into to, merging directories instead of
+// skipping them: Rust ships rustc and cargo as separate archives and both carry
+// a bin/ (and a share/doc/), so treating an existing directory as "already done"
+// would silently drop the second component. Files already present in to are kept
+// as they are, which makes the result independent of the order the archives are
+// unpacked in.
+func MergeDirInto(from, to string) error {
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		src := filepath.Join(from, e.Name())
+		dst := filepath.Join(to, e.Name())
+		if e.IsDir() {
+			if st, statErr := os.Stat(dst); statErr == nil && !st.IsDir() {
+				continue
+			}
+			if err := os.MkdirAll(dst, 0o755); err != nil {
+				return err
+			}
+			if err := MergeDirInto(src, dst); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, statErr := os.Stat(dst); statErr == nil {
+			continue
+		}
+		if err := os.Rename(src, dst); err != nil {
+			// Rename does not cross volumes, and the archive may be unpacked
+			// somewhere else; a copy is the fallback that always works.
+			if err := CopyFile(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // MoveContentsUp flattens a directory that holds a single sub-directory: the
 // archive layout used by Node, Go and the Python standalone builds. It is a
 // no-op when the directory does not have exactly one child directory.

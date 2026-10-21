@@ -130,8 +130,8 @@ func TestDownloadBasesPrefersMirrorAndDropsDuplicates(t *testing.T) {
 
 func TestBuiltInSpecsAreComplete(t *testing.T) {
 	specs := All()
-	if len(specs) != 6 {
-		t.Fatalf("All() returned %d runtimes, want 6", len(specs))
+	if len(specs) != 7 {
+		t.Fatalf("All() returned %d runtimes, want 7", len(specs))
 	}
 	for _, sp := range specs {
 		if sp.Name == "" || sp.Title == "" || sp.Kind == "" || sp.Primary == "" {
@@ -176,7 +176,7 @@ func TestRegistryLookupByNamesAndAliases(t *testing.T) {
 	if got := NamesText(); got != strings.Join(Names(), ", ") {
 		t.Fatalf("NamesText = %q", got)
 	}
-	if want := []string{"node", "java", "go", "python", "maven", "adb"}; !equalStrings(Names(), want) {
+	if want := []string{"node", "java", "go", "python", "maven", "adb", "rust"}; !equalStrings(Names(), want) {
 		t.Fatalf("Names = %v, want %v", Names(), want)
 	}
 	for _, sp := range All() {
@@ -193,7 +193,7 @@ func TestRegistryLookupByNamesAndAliases(t *testing.T) {
 			}
 		}
 	}
-	for _, missing := range []string{"", "   ", "golang2", "rust", "nodejs2"} {
+	for _, missing := range []string{"", "   ", "golang2", "kotlin", "nodejs2"} {
 		if got := Lookup(missing); got != nil {
 			t.Errorf("Lookup(%q) = %v, want nil", missing, got)
 		}
