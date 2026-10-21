@@ -6,9 +6,14 @@
 #   .\build.ps1 -TargetOS linux -TargetArch arm64 -Package -> just that one target
 #   .\build.ps1 -Version 0.3.2 -Package -> assert that this tree really is 0.3.2
 #   .\build.ps1 -TargetOS linux -TargetArch arm64 -> cross-build one target (REQ-008)
+#   .\build.ps1 -Package -AllowDirty -> local layout check only: skips the clean-tree
+#       assertion for this tree's builds (CI and release never use it)
 param([string]$Out = 'dist', [switch]$Test, [switch]$Package, [string]$Version = '',
-    [string]$TargetOS = '', [string]$TargetArch = '')
+    [string]$TargetOS = '', [string]$TargetArch = '', [switch]$AllowDirty)
 $ErrorActionPreference = 'Stop'
+if ($AllowDirty) {
+    Write-Host 'WARN  -AllowDirty: the clean-tree assertion for this tree is skipped; nothing produced here is release grade' -ForegroundColor Yellow
+}
 # A same-session caller keeps its own build environment. GOOS/GOARCH/CGO_ENABLED are
 # set below for cross builds, and leaving them behind turns a later `go test` or
 # `go build` in that shell into a cross-compile whose binaries the host cannot run
@@ -212,12 +217,20 @@ if ($Package) {
             $env:CGO_ENABLED = '0'
             Invoke-Step "go build $target" { go build -trimpath -ldflags '-s -w' -o $staged ./cmd/ployenv }
             $meta = (& go version -m $staged | Out-String)
-            if ($meta -notmatch 'vcs\.modified=false') { throw "the $target build comes from a dirty tree (vcs.modified != false); clean up or commit before packaging" }
+            $dirty = ($meta -notmatch 'vcs\.modified=false')
+            if ($dirty -and -not $AllowDirty) { throw "the $target build comes from a dirty tree (vcs.modified != false); clean up or commit before packaging (pass -AllowDirty for a local, non-release check)" }
             $rev = if ($meta -match 'vcs\.revision=([0-9a-f]+)') { $Matches[1] } else { '(absent)' }
             Assert-BinaryKind -Path $staged -OS $osName
             Copy-Item -LiteralPath $staged -Destination $versioned -Force
-            Write-Host ("PASS built-from-tree     {0} (revision {1}, vcs.modified=false)" -f $target, $rev)
-            $provenance += ("$target built from this tree (revision $rev, vcs.modified=false)")
+            if ($dirty) {
+                # -AllowDirty exists so a local check of the release layout does not have to
+                # commit first; what comes out of it is explicitly not release grade.
+                Write-Host ("WARN  built-from-tree     {0} (revision {1}, vcs.modified=true) -AllowDirty: local check only, NOT release grade" -f $target, $rev)
+                $provenance += ("$target built from a dirty tree (revision $rev, vcs.modified=true) -AllowDirty")
+            } else {
+                Write-Host ("PASS built-from-tree     {0} (revision {1}, vcs.modified=false)" -f $target, $rev)
+                $provenance += ("$target built from this tree (revision $rev, vcs.modified=false)")
+            }
         }
 
         # A stable, version-free alias so a consumer can use the fixed URL
