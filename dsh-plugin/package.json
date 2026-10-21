@@ -45,7 +45,9 @@
     "go",
     "python",
     "java",
-    "maven"
+    "maven",
+    "adb",
+    "platform-tools"
   ],
   "author": "MOMIEDEJIYI",
   "publishConfig": {
